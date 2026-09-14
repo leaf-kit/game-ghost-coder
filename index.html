@@ -1,0 +1,2782 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0d11">
+<title>GhostCoder — AI Employee Simulator</title>
+<meta name="description" content="Your AI employee writes the code, runs the terminal, and ships the PR. You keep the credit. A pixel-accurate VS Code and terminal simulator that looks exactly like a very productive afternoon.">
+<meta property="og:title" content="GhostCoder — AI Employee Simulator">
+<meta property="og:description" content="An AI agent that codes, tests, and deploys on screen. Indistinguishable from work.">
+<meta property="og:type" content="website">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>%F0%9F%91%BB</text></svg>">
+<style>
+/* ═══════════════════════════════════════════════════════════════════════
+   GHOSTCODER — 스타일
+   ───────────────────────────────────────────────────────────────────────
+   화면은 두 세계로 나뉜다.
+   ─ #launcher  이 게임의 유일한 "게임 화면". 어둡고 유리 같은 설정 패널.
+   ─ #app       나머지 전부. VS Code / 터미널 / tmux / SRE 대시보드를
+                최대한 있는 그대로 흉내낸다. 여기에는 게임처럼 보이는
+                요소를 하나도 두지 않는다. 둥근 모서리, 그라데이션, 네온
+                같은 것이 끼어드는 순간 가짜가 된다.
+
+   색은 전부 CSS 변수로만 쓴다. --u-* 는 에디터 크롬, --t-* 는 토큰색이고
+   syntax.js 의 테마가 런타임에 꽂아 준다. 그래서 테마 전환에 리렌더가
+   필요 없다.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root{
+  --ui:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,"Helvetica Neue",sans-serif;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Monaco,"Cascadia Mono",Consolas,monospace;
+  --lh:19px;          /* 에디터 줄 높이 — 캐럿/스퀴글 오버레이가 이 값에 맞춰 계산된다 */
+  --fs:12.5px;
+  /* 런처 전용 */
+  --g-accent:#7dd3fc;
+  --g-ink:#e8eef6;
+  --g-dim:#7b8794;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;overflow:hidden;background:#0b0d11}
+body{font-family:var(--ui);color:var(--u-fg);-webkit-font-smoothing:antialiased;overscroll-behavior:none}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;padding:0}
+input{font:inherit}
+::selection{background:var(--u-sel)}
+.ns{user-select:none;-webkit-user-select:none}
+
+/* 얇은 VS Code 스크롤바 */
+.sb{scrollbar-width:thin;scrollbar-color:var(--u-scroll) transparent}
+.sb::-webkit-scrollbar{width:10px;height:10px}
+.sb::-webkit-scrollbar-track{background:transparent}
+.sb::-webkit-scrollbar-thumb{background:var(--u-scroll);opacity:.5}
+.sb::-webkit-scrollbar-thumb:hover{background:var(--u-fg)}
+.sb::-webkit-scrollbar-corner{background:transparent}
+
+/* ═══════════════ 앱 셸 ═══════════════ */
+#app{position:fixed;inset:0;display:none;flex-direction:column;background:var(--u-bg);font-size:13px}
+#app.on{display:flex}
+
+/* 타이틀바 — macOS 커스텀 타이틀바(35px) */
+#titlebar{
+  height:35px;flex:none;display:flex;align-items:center;gap:0;
+  background:var(--u-title);color:var(--u-titleFg);
+  border-bottom:1px solid var(--u-border);position:relative;
+}
+#lights{display:flex;gap:8px;padding:0 13px 0 13px;flex:none}
+#lights i{width:12px;height:12px;border-radius:50%;display:block}
+#lights i:nth-child(1){background:#ff5f57}
+#lights i:nth-child(2){background:#febc2e}
+#lights i:nth-child(3){background:#28c840}
+#tb-nav{display:flex;gap:2px;flex:none;opacity:.55;font-size:13px;padding-left:6px}
+#tb-nav span{width:22px;height:22px;display:grid;place-items:center;border-radius:4px}
+#tb-title{
+  position:absolute;left:0;right:0;text-align:center;font-size:12px;letter-spacing:-.01em;
+  color:var(--u-titleFg);opacity:.85;pointer-events:none;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;padding:0 220px;
+}
+#tb-right{margin-left:auto;display:flex;gap:1px;padding-right:10px;flex:none;opacity:.7;font-size:12px}
+#tb-right span{width:26px;height:22px;display:grid;place-items:center;border-radius:4px}
+#tb-right span:hover,#tb-nav span:hover{background:var(--u-hover)}
+
+#mid{flex:1;display:flex;min-height:0}
+#status{
+  height:22px;flex:none;display:flex;align-items:center;font-size:12px;
+  background:var(--u-status);color:var(--u-statusFg);overflow:hidden;white-space:nowrap;
+}
+#status .it{padding:0 7px;height:22px;display:flex;align-items:center;gap:5px;flex:none}
+#status .it:hover{background:rgba(255,255,255,.12)}
+#status .rm{background:var(--u-statusRemote);color:#fff;padding:0 9px}
+#status .sp{flex:1}
+#status b{font-weight:400}
+#status .err{color:inherit}
+
+/* ═══════════════ 액티비티 바 ═══════════════ */
+#activity{
+  width:48px;flex:none;background:var(--u-act);display:flex;flex-direction:column;
+  align-items:center;border-right:1px solid var(--u-border);
+}
+#activity .ic{
+  width:48px;height:48px;display:grid;place-items:center;position:relative;
+  color:var(--u-actFg);opacity:.72;font-size:20px;line-height:1;
+}
+#activity .ic.on{opacity:1;color:var(--u-actActive);box-shadow:inset 2px 0 0 var(--u-actActive)}
+#activity .ic:hover{opacity:1}
+#activity .ic .bdg{
+  position:absolute;right:8px;bottom:8px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;
+  background:var(--u-badge);color:var(--u-badgeFg);font-family:var(--ui);font-size:9px;font-weight:600;
+  display:grid;place-items:center;letter-spacing:0;
+}
+#activity .gap{flex:1}
+
+/* ═══════════════ 사이드바 (탐색기) ═══════════════ */
+#side{
+  width:250px;flex:none;background:var(--u-side);color:var(--u-sideFg);
+  display:flex;flex-direction:column;border-right:1px solid var(--u-border);overflow:hidden;
+}
+#side.hide{display:none}
+.sh{height:35px;flex:none;display:flex;align-items:center;padding:0 20px 0 12px;
+  font-size:11px;letter-spacing:.06em;text-transform:uppercase;opacity:.85}
+.sh .act{margin-left:auto;display:flex;gap:9px;font-size:13px;opacity:.75}
+.sect{border-top:1px solid var(--u-border)}
+.sect > .hd{
+  height:22px;display:flex;align-items:center;gap:4px;padding:0 12px 0 8px;
+  font-size:11px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;opacity:.9;
+}
+.sect > .hd .ch{width:12px;display:inline-block;opacity:.8;font-size:9px}
+#tree{flex:1;overflow:auto;padding-bottom:10px}
+.row{
+  height:22px;display:flex;align-items:center;gap:5px;padding-right:12px;
+  font-size:13px;white-space:nowrap;cursor:default;position:relative;
+}
+.row:hover{background:var(--u-hover)}
+.row.sel{background:var(--u-sel)}
+.row .tw{width:12px;flex:none;text-align:center;font-size:9px;opacity:.75}
+.row .nm{overflow:hidden;text-overflow:ellipsis}
+.row .g{margin-left:auto;font-size:11px;font-weight:600;flex:none;padding-left:8px}
+.row.gM,.row.gM .nm{color:var(--u-dirty)}
+.row.gU,.row.gU .nm{color:var(--u-green)}
+.row.gA,.row.gA .nm{color:var(--u-green)}
+.fi{
+  width:15px;flex:none;font-family:var(--ui);font-size:8.5px;font-weight:700;letter-spacing:-.04em;
+  text-align:center;line-height:1;
+}
+.folder{opacity:.9}
+
+/* ═══════════════ 중앙 ═══════════════ */
+#center{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--u-bg)}
+
+/* 탭 */
+#tabs{
+  height:35px;flex:none;display:flex;background:var(--u-tabBar);overflow:hidden;
+  border-bottom:1px solid var(--u-border);
+}
+.tab{
+  height:35px;display:flex;align-items:center;gap:7px;padding:0 10px;font-size:13px;
+  color:var(--u-tabFg);background:var(--u-tabBar);border-right:1px solid var(--u-border);
+  max-width:230px;flex:none;position:relative;
+}
+.tab.on{background:var(--u-tabActive);color:var(--u-tabActiveFg);box-shadow:inset 0 1px 0 var(--u-tabTop)}
+.tab .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tab .x{width:16px;height:16px;display:grid;place-items:center;border-radius:4px;font-size:12px;opacity:.55}
+.tab.on .x{opacity:.8}
+.tab .x:hover{background:var(--u-hover)}
+.tab .dot{width:8px;height:8px;border-radius:50%;background:currentColor;display:none}
+.tab.dirty .x{display:none}
+.tab.dirty .dot{display:block}
+.tab.preview .nm{font-style:italic}
+#tabs .fill{flex:1;border-bottom:none}
+#tabs-act{margin-left:auto;display:flex;align-items:center;gap:10px;padding:0 12px;flex:none;
+  font-size:13px;opacity:.7;background:var(--u-tabBar)}
+
+/* 빵가루 */
+#crumbs{
+  height:22px;flex:none;display:flex;align-items:center;gap:4px;padding:0 14px;
+  font-size:12px;color:var(--u-fg);opacity:.62;white-space:nowrap;overflow:hidden;
+}
+#crumbs .s{opacity:.5;font-size:9px}
+
+/* ── 에디터 ───────────────────────────────────────────────────────── */
+#edit-wrap{flex:1;display:flex;min-height:0;position:relative;overflow:hidden}
+#scroller{flex:1;display:flex;overflow:hidden;position:relative}
+#gutter{
+  flex:none;padding:8px 0 0;text-align:right;font-family:var(--mono);font-size:var(--fs);
+  line-height:var(--lh);color:var(--u-lineNr);user-select:none;position:relative;
+}
+#gutter .ln{height:var(--lh);padding:0 18px 0 22px;position:relative}
+#gutter .ln.cur{color:var(--u-lineNrActive)}
+#gutter .ln i{position:absolute;left:4px;top:0;bottom:0;width:3px}
+#gutter .ln.add i{background:var(--u-green);opacity:.85}
+#gutter .ln.mod i{background:var(--u-blue);opacity:.85}
+#code-pane{flex:1;position:relative;overflow:hidden;min-width:0}
+#code{
+  position:absolute;top:8px;left:0;right:0;font-family:var(--mono);font-size:var(--fs);
+  line-height:var(--lh);white-space:pre;tab-size:2;color:var(--t-plain);
+}
+#code .line{height:var(--lh);padding:0 22px 0 4px;position:relative}
+#code .line.cur{background:var(--u-cur);box-shadow:inset 0 0 0 1px var(--u-curBorder)}
+#deco{position:absolute;top:8px;left:0;right:0;pointer-events:none}
+#deco .caret{
+  position:absolute;width:2px;height:var(--lh);background:var(--u-accent);
+  background:#aeafad;animation:blink 1.06s steps(1) infinite;
+}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+#deco .sqerr,#deco .sqwarn{
+  position:absolute;height:3px;
+  background-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='3'><path d='M0 3 L1.5 0 L3 3 L4.5 0 L6 3' stroke='%23f14c4c' fill='none' stroke-width='.9'/></svg>");
+  background-repeat:repeat-x;
+}
+#deco .sqwarn{background-image:url("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' width='6' height='3'><path d='M0 3 L1.5 0 L3 3 L4.5 0 L6 3' stroke='%23cca700' fill='none' stroke-width='.9'/></svg>")}
+#deco .sel{position:absolute;height:var(--lh);background:var(--u-sel)}
+#deco .ghost{
+  position:absolute;height:var(--lh);font-family:var(--mono);font-size:var(--fs);line-height:var(--lh);
+  color:var(--u-lineNr);opacity:.72;white-space:pre;font-style:italic;
+}
+#deco .ind{position:absolute;width:1px;background:var(--u-indent);opacity:.65}
+#minimap{
+  width:74px;flex:none;position:relative;overflow:hidden;background:var(--u-bg);
+  border-left:1px solid transparent;padding-top:8px;
+}
+#minimap .ml{height:3px;display:flex;gap:1px;padding-left:4px;overflow:hidden}
+#minimap .ml i{height:2px;display:block;opacity:.72;border-radius:.5px}
+#mm-view{position:absolute;left:0;right:0;background:rgba(255,255,255,.07);pointer-events:none}
+#measure{position:absolute;visibility:hidden;font-family:var(--mono);font-size:var(--fs);white-space:pre;top:-999px}
+
+/* 호버 위젯 (때때로 스쳐 지나감) */
+#hover{
+  position:absolute;z-index:30;max-width:520px;padding:0;display:none;
+  background:var(--u-widget);border:1px solid var(--u-border);box-shadow:0 2px 8px rgba(0,0,0,.36);
+  font-size:12.5px;
+}
+#hover.on{display:block}
+#hover .sig{padding:6px 9px;font-family:var(--mono);font-size:12px;border-bottom:1px solid var(--u-border);color:var(--t-plain)}
+#hover .doc{padding:6px 9px;color:var(--u-fg);opacity:.85;line-height:1.5;max-width:420px}
+
+/* ── 패널 (터미널/문제) ───────────────────────────────────────────── */
+#panel{
+  flex:none;height:250px;display:flex;flex-direction:column;background:var(--u-panel);
+  border-top:1px solid var(--u-panelBorder);min-height:0;
+}
+#panel.hide{display:none}
+#panel.max{flex:1;height:auto}
+#panel-tabs{height:35px;flex:none;display:flex;align-items:center;padding:0 8px 0 18px;gap:0}
+#panel-tabs .pt{
+  padding:0 10px;height:35px;display:flex;align-items:center;font-size:11px;letter-spacing:.04em;
+  text-transform:uppercase;color:var(--u-fg);opacity:.62;position:relative;
+}
+#panel-tabs .pt.on{opacity:1;box-shadow:inset 0 -1px 0 var(--u-fg)}
+#panel-tabs .pt .c{
+  margin-left:6px;min-width:15px;height:15px;padding:0 4px;border-radius:8px;background:var(--u-badge);
+  color:var(--u-badgeFg);font-size:9px;font-weight:600;display:none;place-items:center;letter-spacing:0;
+}
+#panel-tabs .pt .c.on{display:grid}
+#panel-tabs .r{margin-left:auto;display:flex;align-items:center;gap:11px;font-size:13px;opacity:.7;padding-right:6px}
+#panel-body{flex:1;display:flex;min-height:0;overflow:hidden}
+.pv{flex:1;display:none;min-width:0;overflow:auto}
+.pv.on{display:flex}
+
+/* 터미널 */
+#term{flex:1;display:flex;min-width:0}
+#term-out{
+  flex:1;overflow-y:auto;overflow-x:hidden;padding:6px 0 10px 18px;
+  font-family:var(--mono);font-size:12.5px;line-height:17px;color:var(--u-term);white-space:pre-wrap;
+  word-break:break-word;
+}
+#term-out .l{min-height:17px}
+#term-list{
+  width:170px;flex:none;border-left:1px solid var(--u-panelBorder);padding:4px 0;font-size:13px;
+}
+#term-list .t{height:22px;display:flex;align-items:center;gap:7px;padding:0 10px;opacity:.75}
+#term-list .t.on{background:var(--u-sel);opacity:1}
+#term-list .t i{font-style:normal;font-size:11px;opacity:.8;width:12px}
+#term-list .hd{padding:4px 10px 6px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;opacity:.5}
+.cur-blk{display:inline-block;width:7px;height:14px;background:var(--u-term);vertical-align:-2px;
+  animation:blink 1.06s steps(1) infinite}
+
+/* 문제 */
+#problems{flex-direction:column;padding:6px 0;font-size:13px}
+#problems .f{height:22px;display:flex;align-items:center;gap:6px;padding:0 12px;opacity:.9}
+#problems .p{height:22px;display:flex;align-items:center;gap:7px;padding:0 12px 0 32px;white-space:nowrap}
+#problems .p:hover{background:var(--u-hover)}
+#problems .p .m{overflow:hidden;text-overflow:ellipsis}
+#problems .p .src{opacity:.55;font-size:12px}
+#problems .p .loc{opacity:.55;margin-left:auto;font-size:12px;padding-left:12px}
+#problems .none{padding:8px 14px;opacity:.6}
+#output{padding:6px 0 10px 18px;font-family:var(--mono);font-size:12.5px;line-height:17px;
+  color:var(--u-term);white-space:pre-wrap;display:block}
+
+/* ═══════════════ 에이전트 패널 (IDE 우측) ═══════════════ */
+#chat{
+  width:352px;flex:none;background:var(--u-side);border-left:1px solid var(--u-border);
+  display:flex;flex-direction:column;overflow:hidden;
+}
+#chat.hide{display:none}
+#chat .hd{height:35px;flex:none;display:flex;align-items:center;gap:8px;padding:0 10px 0 12px;
+  font-size:11px;letter-spacing:.06em;text-transform:uppercase;opacity:.9;border-bottom:1px solid var(--u-border)}
+#chat .hd .md{
+  margin-left:auto;font-size:10px;letter-spacing:0;text-transform:none;opacity:.7;font-family:var(--mono);
+  padding:1px 6px;border:1px solid var(--u-border);border-radius:3px;
+}
+#chat-body{flex:1;overflow-y:auto;padding:10px 12px 14px;font-size:12.5px;line-height:1.62}
+#chat-body .cu{
+  margin:0 0 12px;padding:8px 10px;background:var(--u-hover);border-left:2px solid var(--u-accent);
+  color:var(--u-fg);
+}
+#chat-body .cu b{display:block;font-size:10px;letter-spacing:.08em;text-transform:uppercase;opacity:.55;
+  margin-bottom:4px;font-weight:600}
+#chat-body .cs{margin:0 0 11px;color:var(--u-fg)}
+#chat-body .ct{margin:0 0 11px;opacity:.6;font-style:italic;display:flex;gap:7px}
+#chat-body .ct .sp{font-style:normal;flex:none;font-family:var(--mono)}
+#chat-body .tool{margin:0 0 3px;font-family:var(--mono);font-size:12px;line-height:1.55;white-space:pre-wrap;word-break:break-all}
+#chat-body .tool .b{color:var(--u-green)}
+#chat-body .tool .n{color:var(--u-fg)}
+#chat-body .res{margin:0 0 11px;padding-left:13px;font-family:var(--mono);font-size:12px;opacity:.62;
+  white-space:pre-wrap;word-break:break-word}
+#chat-body .todo{margin:0 0 12px;font-size:12.5px}
+#chat-body .todo .i{display:flex;gap:7px;padding:1px 0}
+#chat-body .todo .i .bx{flex:none;font-family:var(--mono);opacity:.8}
+#chat-body .todo .i.done{opacity:.5;text-decoration:line-through}
+#chat-body .todo .i.doing .bx{color:var(--u-accent)}
+#chat-body .diff{margin:0 0 11px;font-family:var(--mono);font-size:11.5px;line-height:15px;
+  border:1px solid var(--u-border);overflow:hidden}
+#chat-body .diff .h{padding:2px 7px;background:var(--u-hover);font-size:11px;opacity:.75}
+#chat-body .diff .d{padding:3px 0;max-height:190px;overflow:hidden}
+#chat-body .diff .d div{padding:0 7px;white-space:pre;overflow:hidden;text-overflow:ellipsis}
+#chat-body .diff .d .a{color:var(--u-green);background:rgba(35,209,139,.09)}
+#chat-body .diff .d .r{color:var(--u-red);background:rgba(241,76,76,.09)}
+#chat-body .diff .d .c{opacity:.5}
+#chat-body .fin{margin:12px 0 4px;padding:9px 11px;border:1px solid var(--u-border);background:var(--u-hover)}
+#chat-body .fin .t{font-size:10px;letter-spacing:.08em;text-transform:uppercase;opacity:.55;margin-bottom:5px}
+#chat-body .fin .s{display:flex;flex-wrap:wrap;gap:4px 8px;margin-top:8px;font-family:var(--mono);font-size:11px;opacity:.75}
+#chat-body .fin .s span::before{content:"· "}
+#chat-foot{
+  flex:none;border-top:1px solid var(--u-border);padding:8px 12px 10px;font-size:11px;
+  font-family:var(--mono);opacity:.6;display:flex;align-items:center;gap:8px;
+}
+#chat-foot .sp{opacity:1}
+#chat-box{
+  flex:none;margin:0 12px 12px;border:1px solid var(--u-border);background:var(--u-bg);
+  padding:7px 9px;font-size:12.5px;opacity:.5;display:flex;align-items:center;gap:7px;
+}
+
+/* ═══════════════ 레이아웃: 에이전트 (전체화면 터미널) ═══════════════ */
+#lay-agent{flex:1;display:none;flex-direction:column;min-width:0;min-height:0;background:#0c0c0c}
+#app.l-agent #lay-agent{display:flex}
+#ag-tabs{
+  height:28px;flex:none;display:flex;align-items:stretch;background:#1b1b1b;
+  border-bottom:1px solid #000;font-size:12px;
+}
+#ag-tabs .t{padding:0 16px;display:flex;align-items:center;gap:7px;color:#8a8a8a;
+  border-right:1px solid #000;max-width:260px}
+#ag-tabs .t.on{background:#0c0c0c;color:#e8e8e8}
+#ag-tabs .t .dt{width:6px;height:6px;border-radius:50%;background:#5ec26a;flex:none}
+#ag-tabs .plus{margin-left:auto;padding:0 12px;display:flex;align-items:center;color:#6a6a6a}
+#ag-body{flex:1;display:flex;min-height:0}
+#ag-out{
+  flex:1;overflow-y:auto;padding:12px 0 18px 20px;font-family:var(--mono);
+  font-size:13px;line-height:19px;color:#cfcfcf;white-space:pre-wrap;word-break:break-word;
+}
+#ag-out .l{min-height:19px}
+#ag-side{
+  width:250px;flex:none;border-left:1px solid #1e1e1e;padding:12px 14px;font-family:var(--mono);
+  font-size:11.5px;line-height:1.75;color:#7a7a7a;overflow:hidden;
+}
+#ag-side .h{color:#aaa;letter-spacing:.06em;font-size:10px;margin:0 0 7px;text-transform:uppercase}
+#ag-side .k{display:flex;justify-content:space-between;gap:10px}
+#ag-side .k b{font-weight:400;color:#c8c8c8}
+#ag-side .bar{height:3px;background:#1e1e1e;margin:4px 0 12px;overflow:hidden}
+#ag-side .bar i{display:block;height:100%;background:#5a8dd6;transition:width .5s ease}
+#ag-side .sec{margin-top:16px}
+#ag-side .tl div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#ag-foot{
+  height:24px;flex:none;display:flex;align-items:center;gap:14px;padding:0 20px;
+  background:#141414;border-top:1px solid #000;font-family:var(--mono);font-size:11.5px;color:#7a7a7a;
+}
+#ag-foot .sp{margin-left:auto}
+
+/* ═══════════════ 레이아웃: 스웜 (tmux 4분할) ═══════════════ */
+#lay-swarm{flex:1;display:none;flex-direction:column;min-width:0;min-height:0;background:#000}
+#app.l-swarm #lay-swarm{display:flex}
+#sw-grid{flex:1;display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:1px;background:#2a2a2a;min-height:0}
+.pane{display:flex;flex-direction:column;background:#0c0c0c;min-width:0;overflow:hidden;position:relative}
+.pane.act{outline:1px solid #4a7a3a;outline-offset:-1px}
+.pane .ph{
+  height:19px;flex:none;display:flex;align-items:center;gap:8px;padding:0 8px;
+  background:#1c1c1c;font-family:var(--mono);font-size:11px;color:#8a8a8a;
+}
+.pane.act .ph{background:#2b3a26;color:#cfe8c0}
+.pane .ph .n{color:#cfcfcf}
+.pane .ph .st{margin-left:auto;opacity:.8}
+.pane .po{
+  flex:1;overflow:hidden;padding:5px 0 6px 9px;font-family:var(--mono);font-size:11px;
+  line-height:15px;color:#c4c4c4;white-space:pre-wrap;word-break:break-all;
+  display:flex;flex-direction:column;justify-content:flex-end;
+}
+.pane .po .l{min-height:15px;flex:none}
+#sw-status{
+  height:20px;flex:none;display:flex;align-items:center;background:#3a7d44;color:#0b1a0d;
+  font-family:var(--mono);font-size:11.5px;padding:0 8px;gap:0;
+}
+#sw-status .s{background:#1e3f23;color:#cfe8c0;padding:0 8px;height:20px;display:flex;align-items:center}
+#sw-status .w{padding:0 9px;opacity:.85}
+#sw-status .w.on{background:#cfe8c0;color:#1e3f23;font-weight:600;opacity:1}
+#sw-status .sp{flex:1}
+
+/* ═══════════════ 레이아웃: Ops 대시보드 ═══════════════ */
+#lay-ops{flex:1;display:none;flex-direction:column;min-width:0;min-height:0;background:#0d1117;color:#c9d1d9}
+#app.l-ops #lay-ops{display:flex}
+#ops-top{
+  flex:none;display:grid;grid-template-columns:repeat(6,1fr);gap:1px;background:#161b22;
+  border-bottom:1px solid #21262d;
+}
+.tile{padding:9px 13px 10px;background:#0d1117;min-width:0}
+.tile .k{font-size:9.5px;letter-spacing:.12em;color:#7d8590;white-space:nowrap}
+.tile .v{font-size:22px;font-weight:600;letter-spacing:-.02em;margin-top:3px;font-variant-numeric:tabular-nums;
+  font-family:var(--mono)}
+.tile .v small{font-size:11px;font-weight:400;color:#7d8590;margin-left:3px}
+.tile canvas{display:block;width:100%;height:20px;margin-top:5px}
+.tile.ok .v{color:#3fb950}
+.tile.warn .v{color:#d29922}
+.tile.bad .v{color:#f85149}
+#ops-mid{flex:1;display:flex;min-height:0}
+#ops-pipe{width:330px;flex:none;border-right:1px solid #21262d;display:flex;flex-direction:column;overflow:hidden}
+.oh{height:30px;flex:none;display:flex;align-items:center;gap:8px;padding:0 13px;font-size:11px;
+  letter-spacing:.07em;text-transform:uppercase;color:#7d8590;border-bottom:1px solid #21262d}
+.oh .r{margin-left:auto;font-family:var(--mono);font-size:11px;letter-spacing:0;text-transform:none}
+#pipe-list{flex:1;overflow:auto;padding:6px 0}
+#pipe-list .st{display:flex;align-items:center;gap:9px;padding:4px 13px;font-size:12.5px;min-height:24px}
+#pipe-list .st .i{width:13px;flex:none;text-align:center;font-family:var(--mono);font-size:12px}
+#pipe-list .st .n{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#pipe-list .st .d{font-family:var(--mono);font-size:11px;color:#6e7681;flex:none}
+#pipe-list .st.wait{color:#484f58}
+#pipe-list .st.run{color:#e6edf3}
+#pipe-list .st.run .i{color:#d29922}
+#pipe-list .st.ok .i{color:#3fb950}
+#pipe-list .st.ok{color:#8b949e}
+#ops-right{flex:1;display:flex;flex-direction:column;min-width:0}
+#ops-log{
+  flex:1;overflow:hidden;padding:6px 0 8px 14px;font-family:var(--mono);font-size:11.5px;
+  line-height:16px;color:#8b949e;white-space:pre;display:flex;flex-direction:column;justify-content:flex-end;
+}
+#ops-log .l{min-height:16px;flex:none;overflow:hidden;text-overflow:ellipsis}
+#ops-agent{
+  height:210px;flex:none;border-top:1px solid #21262d;display:flex;flex-direction:column;overflow:hidden;
+}
+#ops-agent-out{
+  flex:1;overflow:hidden;padding:6px 0 8px 14px;font-family:var(--mono);font-size:11.5px;line-height:16px;
+  color:#c9d1d9;white-space:pre-wrap;word-break:break-word;display:flex;flex-direction:column;justify-content:flex-end;
+}
+#ops-agent-out .l{min-height:16px;flex:none}
+
+/* ═══════════════ 레이아웃: AGI 자율 플릿 ═══════════════
+   한 대를 자세히 보여주는 대신, 수백 대의 처리량을 집계로 보여준다.
+   판은 작고 촘촘하며 글씨는 읽으라고 있는 것이 아니다. */
+#lay-agi{flex:1;display:none;flex-direction:column;min-width:0;min-height:0;background:#07090d;color:#c8d3de}
+#app.l-agi #lay-agi{display:flex}
+#agi-head{
+  flex:none;display:grid;grid-template-columns:repeat(8,1fr);gap:1px;background:#12161c;
+  border-bottom:1px solid #1c2128;
+}
+#agi-head .t{padding:8px 11px 9px;background:#0a0d12;min-width:0}
+#agi-head .t .k{font-size:9px;letter-spacing:.11em;color:#68737f;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#agi-head .t .v{font-family:var(--mono);font-size:20px;font-weight:600;letter-spacing:-.025em;margin-top:3px;
+  color:#e6eef7;font-variant-numeric:tabular-nums}
+#agi-head .t .v small{font-size:10px;color:#68737f;margin-left:2px;font-weight:400}
+#agi-head .t.hot .v{color:#5ee08a}
+#agi-head .t .d{font-family:var(--mono);font-size:9.5px;color:#4f5a66;margin-top:2px}
+#agi-grid{
+  flex:1;display:grid;gap:1px;background:#161b22;min-height:0;min-width:0;
+  grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:repeat(3,minmax(0,1fr));
+}
+.ap{display:flex;flex-direction:column;background:#0a0d12;min-width:0;overflow:hidden}
+.ap .h{
+  height:17px;flex:none;display:flex;align-items:center;gap:7px;padding:0 7px;background:#11151b;
+  font-family:var(--mono);font-size:10px;color:#5f6b78;white-space:nowrap;overflow:hidden;
+}
+.ap .h .n{color:#9fb0c0}
+.ap .h .tk{color:#5a8dd6}
+.ap .h .w{margin-left:auto;color:#5ee08a}
+.ap .o{
+  flex:1;overflow:hidden;padding:3px 0 4px 7px;font-family:var(--mono);
+  font-size:var(--ap-fs,10px);line-height:var(--ap-lh,13px);
+  color:#8c99a6;white-space:pre;display:flex;flex-direction:column;justify-content:flex-end;
+}
+.ap .o .l{min-height:var(--ap-lh,13px);flex:none;overflow:hidden;text-overflow:ellipsis}
+#agi-grid.dense .ap .h{height:14px;font-size:8.5px;padding:0 5px;gap:5px}
+#agi-grid.dense .ap .o{padding:2px 0 2px 5px}
+#agi-grid.dense .ap .h .w{display:none}
+#agi-foot{
+  height:184px;flex:none;border-top:1px solid #1c2128;display:flex;flex-direction:column;overflow:hidden;
+}
+#agi-foot .h{
+  height:24px;flex:none;display:flex;align-items:center;gap:9px;padding:0 12px;font-size:10px;
+  letter-spacing:.09em;text-transform:uppercase;color:#68737f;border-bottom:1px solid #1c2128;
+}
+#agi-foot .h .r{margin-left:auto;font-family:var(--mono);font-size:10.5px;letter-spacing:0;text-transform:none}
+#agi-ev{
+  flex:1;overflow:hidden;padding:4px 0 6px 12px;font-family:var(--mono);font-size:11px;line-height:15px;
+  color:#8c99a6;white-space:pre;display:flex;flex-direction:column;justify-content:flex-end;
+}
+#agi-ev .l{min-height:15px;flex:none;overflow:hidden;text-overflow:ellipsis}
+
+/* ═══════════════ 조작 바 ═══════════════
+   화면에 게임 UI 를 남기지 않기 위해, 마우스를 움직일 때만 나타나고
+   2.6초 뒤에 사라진다. 아무도 안 만지면 아무것도 보이지 않는다. */
+#ctl{
+  position:fixed;left:50%;bottom:26px;transform:translateX(-50%) translateY(6px);z-index:80;
+  display:flex;gap:2px;padding:4px;border-radius:11px;
+  background:rgba(14,17,22,.86);border:1px solid rgba(255,255,255,.1);
+  box-shadow:0 10px 34px rgba(0,0,0,.5);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  opacity:0;pointer-events:none;transition:opacity .22s ease,transform .22s ease;font-family:var(--ui);
+}
+#ctl.on{opacity:1;pointer-events:auto;transform:translateX(-50%) translateY(0)}
+#ctl button{
+  height:32px;padding:0 12px;border-radius:8px;font-size:11.5px;font-weight:550;color:#c3cfdb;
+  display:flex;align-items:center;gap:6px;transition:background .15s,color .15s;white-space:nowrap;
+}
+#ctl button:hover{background:rgba(255,255,255,.09);color:#fff}
+#ctl button.act{background:rgba(125,211,252,.16);color:#9fd8f6}
+#ctl button .g{font-family:var(--mono);font-size:12px;opacity:.85}
+#ctl .sep{width:1px;margin:5px 3px;background:rgba(255,255,255,.1)}
+
+/* ═══════════════ 알림 / 팔레트 ═══════════════ */
+#toasts{position:fixed;right:18px;bottom:36px;z-index:60;display:flex;flex-direction:column;
+  gap:8px;align-items:flex-end;pointer-events:none}
+.toast{
+  width:400px;background:var(--u-widget);border:1px solid var(--u-border);color:var(--u-fg);
+  box-shadow:0 4px 14px rgba(0,0,0,.4);font-size:12.5px;animation:tin .22s ease;
+}
+@keyframes tin{from{transform:translateY(8px);opacity:0}to{transform:none;opacity:1}}
+.toast.out{animation:tout .3s ease forwards}
+@keyframes tout{to{transform:translateY(6px);opacity:0}}
+.toast .r1{display:flex;align-items:flex-start;gap:9px;padding:9px 10px 9px 11px;line-height:1.5}
+.toast .r1 .ic{flex:none;font-size:13px;line-height:1.35}
+.toast.ok .r1 .ic{color:var(--u-green)}
+.toast.warn .r1 .ic{color:var(--u-yellow)}
+.toast.err .r1 .ic{color:var(--u-red)}
+.toast .r1 .tx{flex:1;min-width:0}
+.toast .r1 .x{opacity:.5;font-size:12px}
+.toast .src{padding:0 11px 8px;font-size:11px;opacity:.55}
+.toast .btns{display:flex;gap:7px;padding:0 11px 10px;justify-content:flex-end}
+.toast .btns button{font-size:12px;padding:3px 11px;background:var(--u-accent);color:#fff}
+.toast .btns button.sec{background:var(--u-hover);color:var(--u-fg)}
+
+/* 채팅 핑 — 우상단 (Slack 알림 모양) */
+#pings{position:fixed;right:18px;top:48px;z-index:60;display:flex;flex-direction:column;gap:8px;
+  align-items:flex-end;pointer-events:none}
+.ping{
+  width:330px;background:#1a1d21;border:1px solid #2c2f33;border-radius:8px;color:#e8e8e8;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);padding:10px 12px;font-size:12.5px;line-height:1.5;
+  animation:tin .22s ease;font-family:var(--ui);
+}
+.ping.out{animation:tout .3s ease forwards}
+.ping .h{display:flex;align-items:center;gap:7px;margin-bottom:5px}
+.ping .h .av{width:18px;height:18px;border-radius:4px;display:grid;place-items:center;font-size:10px;
+  font-weight:700;color:#0b0d11;flex:none}
+.ping .h .n{font-weight:600;font-size:12.5px}
+.ping .h .c{opacity:.5;font-size:11.5px}
+.ping .h .t{margin-left:auto;opacity:.4;font-size:11px}
+.ping .b{opacity:.9}
+
+/* 커맨드 팔레트 */
+#palette{
+  position:fixed;top:0;left:50%;transform:translateX(-50%);width:600px;max-width:94vw;z-index:70;
+  background:var(--u-widget);border:1px solid var(--u-border);box-shadow:0 6px 22px rgba(0,0,0,.5);
+  display:none;margin-top:34px;
+}
+#palette.on{display:block}
+#palette .in{padding:7px 9px;border-bottom:1px solid var(--u-border)}
+#palette .in div{
+  background:var(--u-bg);border:1px solid var(--u-accent);padding:4px 7px;font-size:13px;
+  color:var(--u-fg);min-height:24px;
+}
+#palette .it{display:flex;align-items:center;gap:9px;padding:4px 12px;font-size:13px;height:22px}
+#palette .it.on{background:var(--u-sel)}
+#palette .it .kb{margin-left:auto;font-family:var(--mono);font-size:11px;opacity:.6}
+
+/* 첫 시작 힌트 */
+#hint{
+  position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:65;
+  background:rgba(12,14,18,.9);border:1px solid rgba(255,255,255,.12);color:#cfd8e3;
+  padding:8px 15px;font-size:11.5px;letter-spacing:.01em;font-family:var(--ui);
+  border-radius:6px;pointer-events:none;transition:opacity .8s ease;
+}
+#hint kbd{font-family:var(--mono);font-size:10.5px;padding:1px 5px;border-radius:3px;
+  background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.12);margin:0 2px}
+#hint.off{opacity:0}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   런처 — 이 게임의 유일한 게임 화면
+   ═══════════════════════════════════════════════════════════════════════ */
+#launcher{
+  position:fixed;inset:0;z-index:100;display:flex;flex-direction:column;align-items:center;
+  padding:26px 18px;overflow-y:auto;overscroll-behavior:contain;
+  background:
+    radial-gradient(120% 80% at 50% -10%,rgba(30,58,86,.32),transparent 62%),
+    radial-gradient(90% 60% at 88% 104%,rgba(86,42,86,.2),transparent 60%),
+    linear-gradient(180deg,#0a0c11,#070910 70%);
+  color:var(--g-ink);font-family:var(--ui);
+  transition:opacity .5s ease,visibility .5s;
+}
+#launcher.hide{opacity:0;visibility:hidden;pointer-events:none}
+#launcher::before{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+  background-image:linear-gradient(rgba(255,255,255,.022) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(255,255,255,.022) 1px,transparent 1px);
+  background-size:44px 44px;
+  mask-image:radial-gradient(70% 55% at 50% 30%,#000,transparent 75%);
+  -webkit-mask-image:radial-gradient(70% 55% at 50% 30%,#000,transparent 75%);
+}
+.lw{width:100%;max-width:1020px;margin:auto;position:relative;padding:6px 0 12px}
+
+.brand{text-align:center;margin-bottom:26px}
+.brand .eye{font-size:9.5px;letter-spacing:.42em;color:var(--g-accent);opacity:.85;text-transform:uppercase;
+  font-weight:600;font-family:var(--mono)}
+.brand h1{
+  margin:12px 0 0;font-size:clamp(34px,7.4vw,62px);font-weight:800;letter-spacing:-.045em;line-height:1;
+  background:linear-gradient(174deg,#fff 6%,#9fd5f2 62%,#5a8fb8 120%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 8px 40px rgba(125,211,252,.13));
+}
+.brand .sub{font-family:var(--mono);font-size:clamp(8.5px,1.7vw,11px);letter-spacing:.48em;
+  color:var(--g-dim);margin-top:13px;text-indent:.48em}
+.brand .tag{margin-top:17px;font-size:clamp(12px,2.3vw,14.5px);color:#a9b8c8;line-height:1.72;
+  max-width:620px;margin-left:auto;margin-right:auto}
+.brand .tag em{font-style:normal;color:var(--g-accent)}
+
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:11px}
+@media (max-width:820px){.grid{grid-template-columns:1fr}}
+.gp{
+  padding:14px 15px 15px;background:rgba(12,17,25,.62);border:1px solid rgba(255,255,255,.075);
+  border-radius:13px;backdrop-filter:blur(12px) saturate(1.15);-webkit-backdrop-filter:blur(12px) saturate(1.15);
+  box-shadow:0 12px 40px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.04);
+}
+.gp.w2{grid-column:1/-1}
+@media (max-width:820px){.gp.w2{grid-column:auto}}
+.gp > .lb{display:flex;align-items:baseline;gap:9px;margin-bottom:11px;flex-wrap:wrap}
+.gp > .lb .n{font-size:12.5px;font-weight:650;letter-spacing:-.012em}
+.gp > .lb .h{font-size:10px;color:var(--g-dim)}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{
+  padding:8px 12px;border-radius:9px;font-size:12px;font-weight:520;letter-spacing:-.012em;
+  background:rgba(255,255,255,.035);border:1px solid rgba(255,255,255,.07);color:#9dabba;
+  transition:background .16s,border-color .16s,color .16s,transform .16s;display:flex;align-items:center;gap:7px;
+}
+.chip:hover{background:rgba(255,255,255,.08);color:var(--g-ink);transform:translateY(-1px)}
+.chip.on{background:rgba(125,211,252,.13);border-color:rgba(125,211,252,.36);color:var(--g-accent);
+  box-shadow:0 4px 16px rgba(125,211,252,.1)}
+.chip .em{font-size:12px;opacity:.85}
+.chip.on .em{opacity:1}
+.hint{margin-top:10px;font-size:10.5px;color:var(--g-dim);line-height:1.66;min-height:3.3em}
+.hint b{color:#b9c6d4;font-weight:600}
+
+.fields{display:grid;grid-template-columns:1fr 1fr 1fr;gap:11px}
+@media (max-width:820px){.fields{grid-template-columns:1fr}}
+.fd{display:flex;flex-direction:column;gap:6px}
+.fd label{font-size:9.5px;letter-spacing:.14em;color:var(--g-dim);text-transform:uppercase}
+.fd .bx{position:relative;display:flex;align-items:center}
+.fd .bx .pre{position:absolute;left:12px;font-size:12px;color:var(--g-dim);pointer-events:none;font-family:var(--mono)}
+.fd input,.fd select{
+  width:100%;height:42px;padding:0 12px 0 34px;border-radius:10px;appearance:none;
+  background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.085);
+  color:var(--g-ink);font-size:13.5px;font-weight:540;outline:none;transition:.18s;
+}
+.fd select{padding-left:34px;cursor:pointer}
+.fd input::placeholder{color:#5c6a78;font-weight:450}
+.fd input:focus,.fd select:focus{border-color:rgba(125,211,252,.4);background:rgba(255,255,255,.07);
+  box-shadow:0 0 0 3px rgba(125,211,252,.1)}
+.fd .dice{position:absolute;right:6px;height:30px;padding:0 11px;border-radius:7px;font-size:11px;
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.09);color:var(--g-dim);transition:.16s}
+.fd .dice:hover{color:var(--g-accent);border-color:rgba(125,211,252,.34)}
+
+.toggles{display:flex;flex-wrap:wrap;gap:6px}
+.tg{
+  display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:9px;font-size:12px;
+  background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.065);color:#9dabba;transition:.16s;
+}
+.tg:hover{color:var(--g-ink);background:rgba(255,255,255,.07)}
+.tg .sw{width:26px;height:15px;border-radius:8px;background:rgba(255,255,255,.1);position:relative;flex:none;transition:.18s}
+.tg .sw::after{content:"";position:absolute;top:2px;left:2px;width:11px;height:11px;border-radius:50%;
+  background:#8b98a6;transition:.18s}
+.tg.on{color:var(--g-accent);border-color:rgba(125,211,252,.3);background:rgba(125,211,252,.1)}
+.tg.on .sw{background:rgba(125,211,252,.42)}
+.tg.on .sw::after{left:13px;background:#e6f6ff}
+
+.go{display:flex;gap:10px;align-items:stretch;margin-top:17px;flex-wrap:wrap}
+#b-start{
+  flex:1;min-width:270px;height:54px;border-radius:14px;font-size:15px;font-weight:700;color:#061019;
+  background:linear-gradient(100deg,#fff 0%,#9fd8f6 82%);
+  box-shadow:0 10px 36px rgba(125,211,252,.18),inset 0 1px 0 rgba(255,255,255,.7);
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  transition:transform .16s cubic-bezier(.2,1.4,.4,1),box-shadow .22s;
+}
+#b-start:hover{transform:translateY(-2px);box-shadow:0 16px 46px rgba(125,211,252,.28)}
+#b-start:active{transform:translateY(0)}
+#b-rand{height:54px;padding:0 20px;border-radius:14px;font-size:12.5px;font-weight:600;color:var(--g-ink);
+  background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);transition:.18s}
+#b-rand:hover{background:rgba(255,255,255,.1);border-color:rgba(125,211,252,.34);color:var(--g-accent)}
+/* 저장소 링크 — 조용하게. 실행 버튼과 경쟁하지 않아야 한다. */
+.repo{margin-top:15px;text-align:center}
+.repo a{
+  display:inline-flex;align-items:center;gap:7px;padding:7px 14px;border-radius:9px;
+  font-size:11.5px;font-weight:550;letter-spacing:-.005em;color:#8593a1;text-decoration:none;
+  background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);
+  transition:color .16s,background .16s,border-color .16s,transform .16s;
+}
+.repo a:hover{color:var(--g-ink);background:rgba(255,255,255,.075);
+  border-color:rgba(125,211,252,.3);transform:translateY(-1px)}
+.repo a svg{width:14px;height:14px;fill:currentColor;flex:none;opacity:.85}
+.repo a:hover svg{opacity:1}
+.repo a .arw{font-size:10px;opacity:.55}
+
+.foot{margin-top:17px;text-align:center;font-size:10.5px;color:#61707f;line-height:1.95}
+.foot kbd{font-family:var(--mono);font-size:9.5px;padding:2px 5px;border-radius:4px;margin:0 1px;
+  background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.085);color:#8b98a6}
+.foot em{color:var(--g-accent);font-style:normal}
+.foot .warn{margin-top:9px;color:#6e7d8c;max-width:620px;margin-left:auto;margin-right:auto}
+
+@media (max-width:560px){
+  .gp{padding:12px 12px 13px}
+  .chip{padding:7px 10px;font-size:11.5px}
+  .lw{padding-top:0}
+}
+</style>
+</head>
+<body>
+
+<!-- ═════════════ 가짜 화면 (실제 게임 본체) ═════════════ -->
+<div id="app" class="ns">
+
+  <div id="titlebar">
+    <div id="lights"><i></i><i></i><i></i></div>
+    <div id="tb-nav"><span>‹</span><span>›</span></div>
+    <div id="tb-title">—</div>
+    <div id="tb-right"><span>⬓</span><span>◫</span><span>▭</span><span>⌗</span></div>
+  </div>
+
+  <div id="mid">
+
+    <!-- 액티비티 바 -->
+    <div id="activity">
+      <div class="ic on" data-i="explorer" title="Explorer"></div>
+      <div class="ic" data-i="search" title="Search"></div>
+      <div class="ic" data-i="scm" title="Source Control"><span class="bdg" id="scm-badge">5</span></div>
+      <div class="ic" data-i="debug" title="Run and Debug"></div>
+      <div class="ic" data-i="ext" title="Extensions"></div>
+      <div class="ic" data-i="agent" title="Agent"></div>
+      <div class="gap"></div>
+      <div class="ic" data-i="account" title="Accounts"></div>
+      <div class="ic" data-i="gear" title="Settings"></div>
+    </div>
+
+    <!-- 탐색기 -->
+    <div id="side">
+      <div class="sh"><span data-t="ui.explorer">Explorer</span><span class="act"><span>⊕</span><span>⊞</span><span>↻</span><span>⋯</span></span></div>
+      <div class="sect">
+        <div class="hd"><span class="ch">▾</span><span id="repo-name">repo</span></div>
+      </div>
+      <div id="tree" class="sb"></div>
+      <div class="sect"><div class="hd"><span class="ch">▸</span><span data-t="ui.outline">Outline</span></div></div>
+      <div class="sect"><div class="hd"><span class="ch">▸</span><span data-t="ui.timeline">Timeline</span></div></div>
+    </div>
+
+    <!-- 중앙: 레이아웃별로 하나만 보인다 -->
+    <div id="center">
+
+      <!-- ── IDE ── -->
+      <div id="lay-ide" style="flex:1;display:flex;flex-direction:column;min-height:0;min-width:0">
+        <div id="tabs"><div class="fill"></div><div id="tabs-act"><span>⋯</span><span>◫</span></div></div>
+        <div id="crumbs"></div>
+        <div id="edit-wrap">
+          <div id="scroller">
+            <div id="gutter"></div>
+            <div id="code-pane">
+              <div id="code"></div>
+              <div id="deco"></div>
+              <div id="hover"><div class="sig"></div><div class="doc"></div></div>
+            </div>
+          </div>
+          <div id="minimap"><div id="mm-lines"></div><div id="mm-view"></div></div>
+          <span id="measure">0000000000</span>
+        </div>
+        <div id="panel">
+          <div id="panel-tabs">
+            <div class="pt" data-pv="problems"><span data-t="ui.problems">Problems</span><span class="c" id="pc-prob">0</span></div>
+            <div class="pt" data-pv="output"><span data-t="ui.output">Output</span></div>
+            <div class="pt" data-pv="debug"><span data-t="ui.debug">Debug Console</span></div>
+            <div class="pt on" data-pv="term"><span data-t="ui.terminal">Terminal</span></div>
+            <div class="pt" data-pv="ports"><span data-t="ui.ports">Ports</span></div>
+            <div class="r"><span>⊕</span><span>⌄</span><span>⊟</span><span>⬒</span><span>✕</span></div>
+          </div>
+          <div id="panel-body">
+            <div class="pv on" id="pv-term">
+              <div id="term"><div id="term-out" class="sb"></div><div id="term-list"></div></div>
+            </div>
+            <div class="pv" id="pv-problems"><div id="problems" class="sb"></div></div>
+            <div class="pv" id="pv-output"><div id="output" class="sb"></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 헤드리스 에이전트 ── -->
+      <div id="lay-agent">
+        <div id="ag-tabs">
+          <div class="t on"><span class="dt"></span><span id="ag-tab1">agent</span></div>
+          <div class="t"><span class="dt" style="background:#c9a227"></span><span id="ag-tab2">watch</span></div>
+          <div class="t"><span class="dt" style="background:#5a8dd6"></span><span>logs</span></div>
+          <div class="plus">＋</div>
+        </div>
+        <div id="ag-body">
+          <div id="ag-out" class="sb"></div>
+          <div id="ag-side"></div>
+        </div>
+        <div id="ag-foot"></div>
+      </div>
+
+      <!-- ── 스웜 ── -->
+      <div id="lay-swarm">
+        <div id="sw-grid"></div>
+        <div id="sw-status"></div>
+      </div>
+
+      <!-- ── AGI 자율 플릿 ── -->
+      <div id="lay-agi">
+        <div id="agi-head"></div>
+        <div id="agi-grid"></div>
+        <div id="agi-foot">
+          <div class="h"><span id="agi-ev-title">Merge queue</span><span class="r" id="agi-ev-meta"></span></div>
+          <div id="agi-ev"></div>
+        </div>
+      </div>
+
+      <!-- ── Ops ── -->
+      <div id="lay-ops">
+        <div id="ops-top"></div>
+        <div id="ops-mid">
+          <div id="ops-pipe">
+            <div class="oh"><span data-t="ui.pipeline">Pipeline</span><span class="r" id="pipe-meta"></span></div>
+            <div id="pipe-list" class="sb"></div>
+          </div>
+          <div id="ops-right">
+            <div class="oh"><span data-t="ui.livetail">Live tail</span><span class="r" id="log-meta"></span></div>
+            <div id="ops-log"></div>
+            <div id="ops-agent">
+              <div class="oh"><span data-t="ui.agentsess">Agent session</span><span class="r" id="ops-agent-meta"></span></div>
+              <div id="ops-agent-out"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- 에이전트 패널 (IDE 전용) -->
+    <div id="chat">
+      <div class="hd"><span data-t="ui.agent">✦ Agent</span><span class="md" id="chat-model">model</span></div>
+      <div id="chat-body" class="sb"></div>
+      <div id="chat-box" data-t="ui.ask">⌨ Ask the agent anything…</div>
+      <div id="chat-foot"></div>
+    </div>
+
+  </div>
+
+  <div id="status"></div>
+</div>
+
+<div id="ctl" class="ns">
+  <button id="c-home"><span class="g">⌂</span><span>Main</span></button>
+  <div class="sep"></div>
+  <button id="c-pause"><span class="g">⏸</span><span>Pause</span></button>
+  <button id="c-hyper"><span class="g">🚀</span><span>Hyper</span></button>
+  <button id="c-layout"><span class="g">⊞</span><span>Layout</span></button>
+  <div class="sep"></div>
+  <button id="c-full"><span class="g">⤢</span><span>Fullscreen</span></button>
+</div>
+
+<div id="toasts"></div>
+<div id="pings"></div>
+<div id="palette"><div class="in"><div id="pal-q">&nbsp;</div></div><div id="pal-list"></div></div>
+<div id="hint"></div>
+
+<!-- ═════════════ 런처 ═════════════ -->
+<div id="launcher">
+  <div class="lw">
+    <div class="brand">
+      <div class="eye">Leaf Meta · Coding Entertainment</div>
+      <h1>GhostCoder</h1>
+      <div class="sub">AI&nbsp;EMPLOYEE&nbsp;·&nbsp;AUTONOMOUS&nbsp;ENGINEER&nbsp;SIMULATOR</div>
+      <div class="tag">Your AI employee reads the ticket, writes the code, runs the tests and ships the PR —
+        on a screen nobody can tell from the real thing.<br>
+        <em>You just have to be sitting near it.</em></div>
+    </div>
+
+    <div class="grid">
+      <div class="gp w2">
+        <div class="lb"><span class="n" data-t="id.n">Identity</span><span class="h" data-t="id.h">Shows up in the title bar, the shell prompt, git commits and the agent panel</span></div>
+        <div class="fields">
+          <div class="fd">
+            <label data-t="id.user">Your name</label>
+            <div class="bx"><span class="pre">~</span>
+              <input id="in-user" type="text" maxlength="14" placeholder="leaf" autocomplete="off" spellcheck="false">
+            </div>
+          </div>
+          <div class="fd">
+            <label data-t="id.agent">Agent name</label>
+            <div class="bx"><span class="pre">✦</span>
+              <input id="in-agent" type="text" maxlength="14" placeholder="atlas" autocomplete="off" spellcheck="false">
+              <button class="dice" id="b-dice">🎲</button>
+            </div>
+          </div>
+          <div class="fd">
+            <label data-t="id.model">Model</label>
+            <div class="bx"><span class="pre">◈</span><select id="in-model"></select></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="gp w2">
+        <div class="lb"><span class="n" data-t="lay.n">Workspace layout</span><span class="h" data-t="lay.h">What is on screen — and whether anything is typed at all</span></div>
+        <div class="chips" id="g-layout"></div>
+        <div class="hint" id="h-layout"></div>
+        <div class="lb" style="margin:13px 0 9px"><span class="n" data-t="flt.n">Fleet size</span><span class="h" data-t="flt.h">How many agent panes the AGI layout runs at once</span></div>
+        <div class="chips" id="g-fleet"></div>
+      </div>
+
+      <div class="gp w2">
+        <div class="lb"><span class="n" data-t="stk.n">Development environment</span><span class="h" data-t="stk.h">Repo, file tree, language, tooling and every line of terminal output</span></div>
+        <div class="chips" id="g-stack"></div>
+        <div class="hint" id="h-stack"></div>
+      </div>
+
+      <div class="gp">
+        <div class="lb"><span class="n" data-t="msn.n">Mission</span><span class="h" data-t="msn.h">What the agent is working on</span></div>
+        <div class="chips" id="g-mission"></div>
+        <div class="hint" id="h-mission"></div>
+      </div>
+
+      <div class="gp">
+        <div class="lb"><span class="n" data-t="thm.n">Theme</span><span class="h" data-t="thm.h">Real VS Code colour themes</span></div>
+        <div class="chips" id="g-theme"></div>
+        <div class="lb" style="margin:14px 0 9px"><span class="n" data-t="pac.n">Pace</span><span class="h" data-t="pac.h">Typing and output speed</span></div>
+        <div class="chips" id="g-pace"></div>
+        <div class="hint" id="h-pace"></div>
+      </div>
+
+      <div class="gp w2">
+        <div class="lb"><span class="n" data-t="opt.n">Realism</span><span class="h" data-t="opt.h">Small details that sell it — or give it away</span></div>
+        <div class="toggles" id="g-opts"></div>
+        <div class="hint" id="h-opts"></div>
+      </div>
+
+      <div class="gp w2">
+        <div class="lb"><span class="n" data-t="lang.n">Language</span><span class="h" data-t="lang.h">What the agent speaks. Code, commands and terminal output stay in English.</span></div>
+        <div class="chips" id="g-lang"></div>
+      </div>
+    </div>
+
+    <div class="go">
+      <button id="b-rand" data-t="btn.rand">🎲 Surprise me</button>
+      <button id="b-start" data-t="btn.start">▸ Clock in</button>
+    </div>
+
+    <div class="foot">
+      <kbd>Esc</kbd> settings · <kbd>Space</kbd> pause · <kbd>⌘B</kbd> sidebar · <kbd>⌘J</kbd> panel ·
+      <kbd>⌘⇧P</kbd> palette · <kbd>1</kbd>–<kbd>5</kbd> pace · <kbd>L</kbd> layout · <kbd>F</kbd> fullscreen<br>
+      <kbd>`</kbd> <em>focus</em> — maximises the terminal and floods it with build output, instantly
+      <div class="warn">It runs forever: when a mission finishes, the next ticket starts on its own.
+        Nothing here touches your machine — no files are read or written, no network calls are made.
+        It is a picture of work, not work.</div>
+    </div>
+
+    <!-- 저장소 링크. 런처에만 둔다 — 가짜 작업 화면에 이 프로젝트의
+         흔적이 남으면 그 순간 전부 무너진다. -->
+    <div class="repo">
+      <a href="https://github.com/leaf-kit/game-ghost-coder" target="_blank" rel="noopener noreferrer">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.07-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.42 7.42 0 0 1 2-.27c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A7.995 7.995 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        <span data-t="repo.link">Source on GitHub</span>
+        <span class="arw">↗</span>
+      </a>
+    </div>
+  </div>
+</div>
+
+<script src="syntax.js"></script>
+<script src="i18n.js"></script>
+<script src="scenarios.js"></script>
+<script>
+"use strict";
+
+/* ════════════════════════════════════════════════════════════════════════
+   GHOSTCODER — 엔진
+   ────────────────────────────────────────────────────────────────────────
+   구조는 한 줄로 요약된다. 시나리오가 내놓은 "비트(beat)" 배열을
+   디렉터가 하나씩 꺼내 싱크(sink)에 넘긴다.
+
+     scenarios.js ──beats──▶ Director ──▶ Sink
+                                         ├─ IdeSink     타이핑하는 VS Code
+                                         └─ StreamSink  타이핑 없는 에이전트 출력
+
+   같은 비트 배열이 레이아웃만 바꿔 네 가지 화면으로 렌더된다. 그래서
+   "코드를 짜는 장면"과 "에이전트가 결과만 토해내는 장면"이 서로 다른
+   시나리오를 필요로 하지 않는다.
+
+   비동기 흐름은 전부 await 기반이고, 세대(generation) 토큰으로 중단한다.
+   설정을 바꾸거나 미션을 다시 시작하면 GEN 이 올라가고, 진행 중이던
+   모든 await 가 ABORT 로 풀린다.
+   ════════════════════════════════════════════════════════════════════════ */
+
+const $ = id => document.getElementById(id);
+const mkel = (tag, cls, html) => { const n = document.createElement(tag); if (cls) n.className = cls; if (html != null) n.innerHTML = html; return n; };
+const rnd = (a, b) => a + Math.random() * (b - a);
+const ri = (a, b) => Math.floor(rnd(a, b + 1));
+const pick = a => a[Math.floor(Math.random() * a.length)];
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+const esc = HL.esc;
+const ABORT = Symbol('abort');
+
+/* ── 설정 ─────────────────────────────────────────────────────────────── */
+const CFG = {
+  user: '', agent: '', model: SCEN.MODELS[0], lang: 'en',
+  layout: 'ide', stack: 'next', mission: 'feature', theme: 'dark_modern', pace: 'agentp', fleet: 9,
+  opts: { pings: true, notifs: true, palette: true, sound: false, loop: true },
+};
+
+/** 번역 단축 — 영어면 fallback 을 그대로 쓴다. */
+const T = (key, fallback) => { const v = I18N.s(CFG.lang, key); return v == null ? fallback : v; };
+
+/* ── 액티비티 바 아이콘 ────────────────────────────────────────────────
+   VS Code 코디콘의 형태를 따라 그린 24px SVG. 이모지를 쓰면 폰트에 따라
+   모양이 달라지고, 그 순간 화면이 가짜가 된다. */
+const SVG = {
+  explorer: 'M13.5 2H3v20h18V6.5L13.5 2zm0 2.2L18.8 8H13.5V4.2z',
+  search: 'M15.5 14h-.8l-.3-.3a6.5 6.5 0 1 0-.7.7l.3.3v.8l5 5 1.5-1.5-5-5zm-6 0a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9z',
+  scm: 'M17 6a3 3 0 1 0-4 2.8V10a2 2 0 0 1-2 2H8.9A3 3 0 1 0 7 15.2V8.8A3 3 0 1 0 5 8.8v6.4a3 3 0 1 0 2 0V14h4a4 4 0 0 0 4-4V8.8A3 3 0 0 0 17 6zM6 5a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm0 14a1 1 0 1 1 0-2 1 1 0 0 1 0 2zm8-12a1 1 0 1 1 0-2 1 1 0 0 1 0 2z',
+  debug: 'M9 5v14l11-7L9 5zM4 5h2v14H4V5z',
+  ext: 'M4 4h7v7H4V4zm9 0h7v7h-7V4zM4 13h7v7H4v-7zm12.5 0H15v3.5h-3.5V18H15v3.5h1.5V18H20v-1.5h-3.5V13z',
+  agent: 'M12 2l2.4 6.1L21 10.4l-5.2 4 1.5 6.6L12 17.5l-5.3 3.5 1.5-6.6-5.2-4 6.6-2.3L12 2z',
+  account: 'M12 3a4.5 4.5 0 1 0 0 9 4.5 4.5 0 0 0 0-9zm0 11c-4.4 0-8 2.5-8 5.5V21h16v-1.5c0-3-3.6-5.5-8-5.5z',
+  gear: 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm9.4 5.6l-1.9-1.1V11.5l1.9-1.1-1.9-3.3-2 .8-1-.6-.2-2.1h-3.8l-.2 2.1-1 .6-2-.8-1.9 3.3L5.4 11.5v1l-1.9 1.1 1.9 3.3 2-.8 1 .6.2 2.1h3.8l.2-2.1 1-.6 2 .8 1.9-3.3z',
+};
+function icon(name, size) {
+  return '<svg width="' + (size || 22) + '" height="' + (size || 22) + '" viewBox="0 0 24 24" fill="currentColor" ' +
+    'aria-hidden="true"><path d="' + SVG[name] + '"/></svg>';
+}
+function paintActivity() {
+  document.querySelectorAll('#activity .ic').forEach(n => {
+    const k = n.dataset.i; if (!k || !SVG[k]) return;
+    const badge = n.querySelector('.bdg');
+    n.innerHTML = icon(k) + (badge ? badge.outerHTML : '');
+  });
+}
+
+const OPTS = [
+  { k: 'notifs',  label: 'Editor notifications', hint: 'VS Code toasts in the bottom right: test results, formatter, PR opened.' },
+  { k: 'pings',   label: 'Chat pings',           hint: 'Teammates reacting in the corner. The single most convincing detail — it implies other humans believe you are working.' },
+  { k: 'palette', label: 'Command palette',      hint: 'The palette flashes open now and then, the way it does when someone actually drives the editor by keyboard.' },
+  { k: 'loop',    label: 'Never stop',           hint: 'When a mission finishes the next ticket starts by itself, forever. Leave it running through a meeting.' },
+  { k: 'sound',   label: 'Keyboard sound',       hint: 'Synthesised key clicks. Careful: typing sounds coming from a keyboard nobody is touching is what actually gives this away.' },
+];
+
+/* 상태 */
+let GEN = 0;                 // 세대 토큰
+let PAUSED = false;
+let SPEED = 1;               // 배속 (패닉 모드에서 올라간다)
+let PANIC = false;
+let RUN = null;              // 현재 진행 중인 빌드 결과
+let STARTED = 0;
+let TOKENS = 0;
+let MISSION_N = 0;
+let EDITS = 0, COMMITS = 0, TESTS = 0, CMDS = 0;
+
+/** 속도 단계가 정한 전역 배속. wait() 이 이 값으로 나눈다. */
+const paceMul = () => (SCEN.PACES[CFG.pace].mul || 1);
+
+/* ════════════════════════════════════════════════════════════════════════
+   공용: 마크업 · 대기 · 시계
+   ════════════════════════════════════════════════════════════════════════ */
+const CMAP = {
+  g: 'var(--u-green)', r: 'var(--u-red)', y: 'var(--u-yellow)', b: 'var(--u-blue)',
+  c: 'var(--u-cyan)', m: 'var(--u-magenta)', gr: 'var(--u-gray)',
+  num: 'var(--t-num)', str: 'var(--t-str)',
+};
+
+/** {{색|글자}} 마크업 → HTML. 색 이름은 CMAP, d 는 흐리게, w 는 강조. */
+function mk(s) {
+  return esc(String(s)).replace(/\{\{(\w+)\|([^}]*)\}\}/g, (_, c, t) => {
+    if (c === 'd') return '<span style="opacity:.6">' + t + '</span>';
+    if (c === 'w') return '<span style="color:var(--u-fg);font-weight:600">' + t + '</span>';
+    const col = CMAP[c];
+    return col ? '<span style="color:' + col + '">' + t + '</span>' : t;
+  });
+}
+
+/** 일시정지를 존중하며 기다린다. 세대가 바뀌면 ABORT. */
+function wait(ms) {
+  const g = GEN;
+  return new Promise((res, rej) => {
+    const t0 = performance.now();
+    const left = Math.max(0, ms) / (SPEED * paceMul());
+    (function step() {
+      if (g !== GEN) return rej(ABORT);
+      if (PAUSED) return setTimeout(step, 90);
+      const d = performance.now() - t0;
+      if (d >= left) return res();
+      requestAnimationFrame(step);
+    })();
+  });
+}
+const gate = () => wait(0);
+
+const hhmm = d => String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+const hhmmss = d => hhmm(d) + ':' + String(d.getSeconds()).padStart(2, '0');
+const elapsed = () => {
+  const s = Math.floor((Date.now() - STARTED) / 1000);
+  return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+};
+const ktok = () => (TOKENS < 1000 ? TOKENS + ' tokens' : (TOKENS / 1000).toFixed(1) + 'k tokens');
+
+/* 파일 확장자 → 탭/트리 아이콘 (Seti 아이콘 대용) */
+const ICON = [
+  [/\.tsx?$/, 'TS', '#3178c6'], [/\.jsx?$/, 'JS', '#f0db4f'], [/\.py$/, 'PY', '#ffd845'],
+  [/\.go$/, 'GO', '#00add8'], [/\.rs$/, 'RS', '#dea584'], [/\.ya?ml$/, 'YM', '#cb4b16'],
+  [/\.tf$/, 'TF', '#7b42bc'], [/\.json$/, '{}', '#f5c542'], [/\.toml$/, 'TO', '#a0522d'],
+  [/\.md$/, 'MD', '#519aba'], [/\.proto$/, 'PB', '#8bc34a'], [/\.sql$/, 'SQ', '#dd6b20'],
+  [/lock$/, '🔒', '#8b949e'], [/^Dockerfile|Makefile/, '⚙', '#8b949e'], [/\.sh$/, '$', '#89e051'],
+];
+const iconFor = name => {
+  for (const [re, t, c] of ICON) if (re.test(name)) return [t, c];
+  return ['•', '#8b949e'];
+};
+const iconHTML = name => { const [t, c] = iconFor(name); return '<span class="fi" style="color:' + c + '">' + esc(t) + '</span>'; };
+
+/* ════════════════════════════════════════════════════════════════════════
+   소리 — 합성 키클릭. 파일을 쓰지 않는다.
+   ════════════════════════════════════════════════════════════════════════ */
+const Sound = {
+  ctx: null,
+  ensure() { if (!this.ctx) { try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { /* 무음 */ } } },
+  key() {
+    if (!CFG.opts.sound) return;
+    this.ensure(); const c = this.ctx; if (!c) return;
+    const t = c.currentTime;
+    const buf = c.createBuffer(1, 512, c.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < 512; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / 512, 7);
+    const src = c.createBufferSource(); src.buffer = buf;
+    const bp = c.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = rnd(1500, 3200); bp.Q.value = 1.4;
+    const g = c.createGain(); g.gain.setValueAtTime(0.055, t); g.gain.exponentialRampToValueAtTime(0.0005, t + 0.045);
+    src.connect(bp).connect(g).connect(c.destination); src.start(t); src.stop(t + 0.06);
+  },
+  enter() {
+    if (!CFG.opts.sound) return;
+    this.ensure(); const c = this.ctx; if (!c) return;
+    const t = c.currentTime, o = c.createOscillator(), g = c.createGain();
+    o.type = 'square'; o.frequency.value = 180;
+    g.gain.setValueAtTime(0.03, t); g.gain.exponentialRampToValueAtTime(0.0004, t + 0.07);
+    o.connect(g).connect(c.destination); o.start(t); o.stop(t + 0.08);
+  },
+};
+
+/* ════════════════════════════════════════════════════════════════════════
+   Stream — 줄 버퍼 렌더러
+   ────────────────────────────────────────────────────────────────────────
+   터미널 패널, 헤드리스 에이전트, tmux 각 판, Ops 로그 꼬리가 전부 이걸
+   쓴다. 위로 넘치는 줄은 잘라낸다(브라우저가 수만 줄을 붙들지 않도록).
+   ════════════════════════════════════════════════════════════════════════ */
+class Stream {
+  constructor(node, max = 320) { this.n = node; this.max = max; this.last = null; }
+  clear() { this.n.textContent = ''; this.last = null; }
+  raw(html) {
+    const d = mkel('div', 'l', html);
+    this.n.appendChild(d); this.last = d; this.trim(); this.follow();
+    return d;
+  }
+  line(markup) { return this.raw(mk(markup)); }
+  blank() { return this.raw('&nbsp;'); }
+  trim() { while (this.n.childElementCount > this.max) this.n.removeChild(this.n.firstChild); }
+  follow() { this.n.scrollTop = this.n.scrollHeight; }
+
+  /** 한 줄을 한 글자씩. cps 는 초당 글자 수. */
+  async typeInto(node, text, cps, prefixHTML) {
+    let acc = '';
+    const base = 1000 / Math.max(1, cps);
+    for (let i = 0; i < text.length; i++) {
+      acc += text[i];
+      node.innerHTML = (prefixHTML || '') + esc(acc) + '<span class="cur-blk"></span>';
+      this.follow();
+      if (i % 2 === 0) Sound.key();
+      await wait(base * rnd(0.45, 1.85));
+    }
+    node.innerHTML = (prefixHTML || '') + esc(acc);
+  }
+
+  /** 출력 여러 줄을 총 ms 안에 흘린다. */
+  async spill(lines, ms, indent) {
+    if (!lines || !lines.length) return;
+    const per = Math.max(14, ms / lines.length);
+    for (const l of lines) {
+      await gate();
+      this.raw((indent || '') + mk(l));
+      TOKENS += 6 + Math.floor(String(l).length / 3);
+      await wait(per * rnd(0.35, 1.7));
+    }
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Editor — 에디터 본체
+   ────────────────────────────────────────────────────────────────────────
+   토큰화는 줄 단위로 캐시한다. 타이핑 중에는 마지막 줄만 다시 그린다.
+   캐럿·스퀴글·선택 영역은 DOM 위에 얹는 오버레이이고, 문자 폭 측정치로
+   위치를 계산한다(고정폭 폰트라서 가능).
+   ════════════════════════════════════════════════════════════════════════ */
+const Ed = {
+  files: new Map(),     // path -> {lang, lines, toks, states, marks, dirty}
+  tabs: [],
+  cur: null,
+  cw: 7.2, lh: 19,
+  off: 0,               // 세로 스크롤(px)
+  caret: { l: 0, c: 0 },
+  sq: [],
+
+  init() {
+    const m = $('measure');
+    this.cw = m.getBoundingClientRect().width / 10;
+    this.lh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--lh')) || 19;
+  },
+  reset() {
+    this.files.clear(); this.tabs.length = 0; this.cur = null; this.off = 0; this.sq = [];
+    $('tabs').querySelectorAll('.tab').forEach(t => t.remove());
+    $('code').textContent = ''; $('gutter').textContent = ''; $('deco').textContent = '';
+    $('mm-lines').textContent = ''; $('crumbs').textContent = '';
+  },
+
+  file(path, lang) {
+    let f = this.files.get(path);
+    if (!f) { f = { path, lang: lang || 'txt', lines: [], toks: [], states: [], marks: [], dirty: false }; this.files.set(path, f); }
+    if (lang) f.lang = lang;
+    return f;
+  },
+
+  /* ── 탭 ──────────────────────────────────────────────────────────── */
+  tabEl(path) { return $('tabs').querySelector('[data-p="' + CSS.escape(path) + '"]'); },
+  openTab(path) {
+    if (!this.tabEl(path)) {
+      const name = path.split('/').pop();
+      const t = mkel('div', 'tab', iconHTML(name) + '<span class="nm">' + esc(name) + '</span>' +
+        '<span class="dot"></span><span class="x">✕</span>');
+      t.dataset.p = path;
+      $('tabs').insertBefore(t, $('tabs').querySelector('.fill'));
+      this.tabs.push(path);
+      while (this.tabs.length > 7) { const old = this.tabs.shift(); const e = this.tabEl(old); if (e) e.remove(); }
+    }
+    $('tabs').querySelectorAll('.tab').forEach(t => t.classList.toggle('on', t.dataset.p === path));
+    this.cur = path;
+    const f = this.files.get(path);
+    if (f) $('tabs').querySelector('[data-p="' + CSS.escape(path) + '"]').classList.toggle('dirty', f.dirty);
+    this.crumbs(path);
+    UI.status();
+  },
+  markDirty(path, on) {
+    const f = this.files.get(path); if (f) f.dirty = on;
+    const t = this.tabEl(path); if (t) t.classList.toggle('dirty', on);
+  },
+  crumbs(path) {
+    const parts = path.split('/');
+    let h = '<span style="opacity:.8">' + esc(RUN ? RUN.stack.repo : '') + '</span>';
+    parts.forEach((p, i) => {
+      h += '<span class="s">›</span>';
+      h += (i === parts.length - 1 ? iconHTML(p) + '<span>' + esc(p) + '</span>' : '<span>' + esc(p) + '</span>');
+    });
+    const sym = RUN && RUN.stack.topic ? RUN.stack.topic.symbol : null;
+    if (sym) h += '<span class="s">›</span><span style="color:var(--t-fn)">' + esc(sym) + '</span>';
+    $('crumbs').innerHTML = h;
+  },
+
+  /* ── 렌더 ────────────────────────────────────────────────────────── */
+  retok(f) { const r = HL.tokenize(f.lines.join('\n'), f.lang); f.toks = r.toks; f.states = r.states; },
+
+  renderAll(f) {
+    this.retok(f);
+    const code = $('code'), gut = $('gutter'), mm = $('mm-lines');
+    code.textContent = ''; gut.textContent = ''; mm.textContent = '';
+    for (let i = 0; i < f.lines.length; i++) {
+      code.appendChild(mkel('div', 'line', HL.html(f.toks[i])));
+      gut.appendChild(this.gutEl(f, i));
+      mm.appendChild(this.mmEl(f.toks[i]));
+    }
+    this.paint();
+  },
+  gutEl(f, i) {
+    const m = f.marks[i];
+    const d = mkel('div', 'ln' + (m ? ' ' + m : ''), '<i></i>' + (i + 1));
+    return d;
+  },
+  mmEl(toks) {
+    const d = mkel('div', 'ml');
+    let w = 0;
+    for (const [t, v] of (toks || [])) {
+      const len = v.length; if (!len) continue;
+      const px = Math.max(1, Math.round(len * 1.15));
+      if (w + px > 64) break;
+      w += px + 1;
+      if (t === 'sp') { d.appendChild(mkel('i', null, '')).style.cssText = 'width:' + px + 'px;background:transparent'; continue; }
+      const i2 = mkel('i');
+      i2.style.cssText = 'width:' + px + 'px;background:var(--t-' + t + ',var(--t-plain))';
+      d.appendChild(i2);
+    }
+    return d;
+  },
+  /** 마지막 줄만 다시 그린다 — 타이핑 경로. */
+  touch(f, i) {
+    const inSt = i > 0 ? f.states[i] || HL.ZERO : HL.ZERO;
+    const r = HL.line(f.lines[i], f.lang, inSt);
+    f.toks[i] = r.toks; f.states[i + 1] = r.st;
+    const code = $('code'), gut = $('gutter'), mm = $('mm-lines');
+    if (code.children[i]) code.children[i].innerHTML = HL.html(r.toks);
+    else { code.appendChild(mkel('div', 'line', HL.html(r.toks))); gut.appendChild(this.gutEl(f, i)); mm.appendChild(this.mmEl(r.toks)); }
+    if (mm.children[i]) mm.replaceChild(this.mmEl(r.toks), mm.children[i]);
+  },
+  dropLines(f, n) {
+    const code = $('code'), gut = $('gutter'), mm = $('mm-lines');
+    for (let k = 0; k < n; k++) {
+      if (code.lastElementChild) code.removeChild(code.lastElementChild);
+      if (gut.lastElementChild) gut.removeChild(gut.lastElementChild);
+      if (mm.lastElementChild) mm.removeChild(mm.lastElementChild);
+      f.lines.pop(); f.toks.pop(); f.marks.pop();
+    }
+  },
+
+  /** 스크롤 · 현재 줄 · 캐럿 · 들여쓰기 안내선 · 스퀴글 */
+  paint() {
+    const f = this.files.get(this.cur); if (!f) return;
+    const vh = $('scroller').clientHeight - 8;
+    const total = f.lines.length * this.lh + 40;
+    const want = clamp((this.caret.l + 4) * this.lh - vh, 0, Math.max(0, total - vh));
+    this.off += (want - this.off) * 0.34;
+    if (Math.abs(want - this.off) < 0.6) this.off = want;
+    const tr = 'translateY(' + (-this.off).toFixed(1) + 'px)';
+    $('code').style.transform = tr; $('gutter').style.transform = tr; $('deco').style.transform = tr;
+
+    const code = $('code'), gut = $('gutter');
+    for (let i = 0; i < code.children.length; i++) {
+      code.children[i].classList.toggle('cur', i === this.caret.l);
+      if (gut.children[i]) gut.children[i].classList.toggle('cur', i === this.caret.l);
+    }
+    /* 미니맵: 전체를 뷰 높이에 맞춰 눌러 담고, 뷰포트 상자를 얹는다 */
+    const mmH = $('minimap').clientHeight - 8;
+    const mmTotal = f.lines.length * 3;
+    const mmOff = mmTotal > mmH ? (this.off / Math.max(1, total - vh)) * (mmTotal - mmH) : 0;
+    $('mm-lines').style.transform = 'translateY(' + (-mmOff).toFixed(1) + 'px)';
+    const box = $('mm-view');
+    box.style.height = Math.min(mmH, (vh / this.lh) * 3) + 'px';
+    box.style.top = (8 + (this.off / this.lh) * 3 - mmOff) + 'px';
+
+    /* 오버레이 */
+    const deco = $('deco');
+    deco.textContent = '';
+    const cx = 4 + this.caret.c * this.cw, cy = this.caret.l * this.lh;
+    const car = mkel('div', 'caret'); car.style.cssText = 'left:' + cx + 'px;top:' + cy + 'px';
+    deco.appendChild(car);
+
+    /* 들여쓰기 안내선 */
+    for (let i = 0; i < f.lines.length; i++) {
+      const ln = f.lines[i]; if (!ln.trim()) continue;
+      const ind = ln.match(/^ */)[0].length;
+      for (let k = 2; k <= ind; k += 2) {
+        const g = mkel('div', 'ind');
+        g.style.cssText = 'left:' + (4 + k * this.cw - this.cw) + 'px;top:' + (i * this.lh) + 'px;height:' + this.lh + 'px';
+        deco.appendChild(g);
+      }
+    }
+    /* 선택 영역 */
+    if (this.selRange) {
+      const [a, b] = this.selRange;
+      for (let i = a; i <= b && i < f.lines.length; i++) {
+        const s = mkel('div', 'sel');
+        s.style.cssText = 'left:4px;top:' + (i * this.lh) + 'px;width:' + Math.max(this.cw, f.lines[i].length * this.cw) + 'px';
+        deco.appendChild(s);
+      }
+    }
+    /* 스퀴글 */
+    for (const q of this.sq) {
+      if (q.path !== this.cur || q.line >= f.lines.length) continue;
+      const d = mkel('div', q.sev === 'e' ? 'sqerr' : 'sqwarn');
+      d.style.cssText = 'left:' + (4 + (q.col - 1) * this.cw) + 'px;top:' + (q.line * this.lh + this.lh - 3) +
+        'px;width:' + Math.max(12, q.len * this.cw) + 'px';
+      deco.appendChild(d);
+    }
+    /* 고스트 텍스트 */
+    if (this.ghost) {
+      const g = mkel('div', 'ghost', esc(this.ghost));
+      g.style.cssText = 'left:' + cx + 'px;top:' + cy + 'px';
+      deco.appendChild(g);
+    }
+  },
+
+  /* ── 열기 / 타이핑 ───────────────────────────────────────────────── */
+  open(path, lang, code) {
+    const f = this.file(path, lang);
+    f.lines = code.split('\n'); f.marks = f.lines.map(() => null);
+    this.openTab(path);
+    this.caret = { l: Math.min(f.lines.length - 1, 0), c: 0 };
+    this.off = 0;
+    this.renderAll(f);
+  },
+
+  /** 마지막 del 줄을 선택해 지운다 — 에이전트가 블록을 갈아치우는 장면. */
+  async replaceTail(path, del) {
+    const f = this.files.get(path); if (!f || !del) return;
+    const a = Math.max(0, f.lines.length - del), b = f.lines.length - 1;
+    this.selRange = [a, b];
+    this.caret = { l: b, c: (f.lines[b] || '').length };
+    this.paint();
+    await wait(420);
+    this.selRange = null;
+    this.dropLines(f, Math.min(del, f.lines.length));
+    this.caret = { l: Math.max(0, f.lines.length - 1), c: (f.lines[f.lines.length - 1] || '').length };
+    this.paint();
+    await wait(160);
+  },
+
+  /** 코드를 한 글자씩 써 내려간다. from 이 주어지면 그 줄부터 다시 쓴다. */
+  async type(path, lang, code, cps, from) {
+    const f = this.file(path, lang);
+    this.openTab(path);
+    this.markDirty(path, true);
+    const base = 1000 / Math.max(1, cps);
+    const src = code.split('\n').slice(from || 0);
+
+    if (!from && f.lines.length && f.lines[f.lines.length - 1].trim() !== '') { f.lines.push(''); f.marks.push('add'); this.touch(f, f.lines.length - 1); }
+
+    for (let li = 0; li < src.length; li++) {
+      await gate();
+      const text = src[li];
+      const i = f.lines.length;
+      f.lines.push(''); f.marks.push('add');
+      this.touch(f, i);
+      this.caret = { l: i, c: 0 };
+
+      /* 들여쓰기는 에디터가 자동으로 넣어 준다 — 한 번에 */
+      const ind = text.match(/^\s*/)[0];
+      let buf = ind;
+      f.lines[i] = buf; this.caret.c = buf.length; this.touch(f, i); this.paint();
+      const body = text.slice(ind.length);
+
+      /* Copilot 고스트 텍스트 — 줄의 3분의 1쯤에서 나머지를 제안하고 Tab 으로 받는다 */
+      const useGhost = body.length > 22 && Math.random() < 0.34;
+      const ghostAt = useGhost ? Math.floor(body.length * rnd(0.25, 0.45)) : -1;
+
+      for (let ci = 0; ci < body.length; ci++) {
+        if (ci === ghostAt) {
+          this.ghost = body.slice(ci);
+          this.paint();
+          await wait(base * rnd(7, 13));
+          this.ghost = null;
+          buf += body.slice(ci);
+          f.lines[i] = buf; this.caret.c = buf.length; this.touch(f, i); this.paint();
+          Sound.enter();
+          break;
+        }
+        /* 드물게 오타를 내고 지운다 */
+        if (body.length > 14 && Math.random() < 0.012) {
+          const bad = buf + pick('abcdefghijklmnopqrstuvwxyz'.split(''));
+          f.lines[i] = bad; this.caret.c = bad.length; this.touch(f, i); this.paint();
+          await wait(base * rnd(1.6, 3.2));
+          f.lines[i] = buf; this.caret.c = buf.length; this.touch(f, i); this.paint();
+          await wait(base * rnd(1.4, 2.6));
+        }
+        buf += body[ci];
+        f.lines[i] = buf; this.caret.c = buf.length;
+        this.touch(f, i);
+        if (ci % 2 === 0) this.paint();
+        if (ci % 3 === 0) Sound.key();
+        const ch = body[ci];
+        let d = base * rnd(0.4, 1.7);
+        if (ch === ' ') d *= 0.8;
+        if ('({[:,;'.includes(ch)) d *= 1.35;
+        await wait(d);
+      }
+      this.paint();
+      TOKENS += 4 + Math.ceil(text.length / 3.6);
+      await wait(base * rnd(1.4, 4.2));   // 줄 끝 호흡
+      if (Math.random() < 0.07) await wait(base * rnd(8, 20)); // 생각하는 틈
+    }
+    this.caret.c = (f.lines[f.lines.length - 1] || '').length;
+    this.paint();
+    EDITS++;
+  },
+
+  setSquiggles(list) {
+    this.sq = list.map(p => ({ path: p.file, line: Math.max(0, p.line - 1), col: p.col || 1, len: ri(7, 22), sev: p.sev }));
+    this.paint();
+  },
+};
+
+/* ════════════════════════════════════════════════════════════════════════
+   UI — 트리 · 상태바 · 토스트 · 팔레트 · 미니 위젯
+   ════════════════════════════════════════════════════════════════════════ */
+const UI = {
+  buildTree(stack) {
+    const t = $('tree'); t.textContent = '';
+    $('repo-name').textContent = stack.repo;
+    const walk = (nodes, depth) => {
+      for (const n of nodes) {
+        if (n.d) {
+          const open = !!n.open;
+          const r = mkel('div', 'row', '<span class="tw">' + (open ? '▾' : '▸') + '</span>' +
+            '<span class="folder">📁</span><span class="nm">' + esc(n.d) + '</span>');
+          r.style.paddingLeft = (8 + depth * 9) + 'px';
+          t.appendChild(r);
+          if (open && n.c) walk(n.c, depth + 1);
+        } else {
+          const r = mkel('div', 'row' + (n.git ? ' g' + n.git : ''),
+            '<span class="tw"></span>' + iconHTML(n.f) + '<span class="nm">' + esc(n.f) + '</span>' +
+            (n.git ? '<span class="g">' + n.git + '</span>' : ''));
+          r.style.paddingLeft = (8 + depth * 9) + 'px';
+          r.dataset.p = n.f;
+          t.appendChild(r);
+        }
+      }
+    };
+    walk(stack.tree, 0);
+  },
+  selectTree(path) {
+    const name = path.split('/').pop();
+    $('tree').querySelectorAll('.row').forEach(r => r.classList.toggle('sel', r.dataset.p === name));
+  },
+
+  buildTerms(stack) {
+    const l = $('term-list'); l.textContent = '';
+    l.appendChild(mkel('div', 'hd', 'Terminals'));
+    stack.terms.forEach((n, i) => {
+      const d = mkel('div', 't' + (i === 0 ? ' on' : ''), '<i>' + (i === 0 ? '⌘' : '›') + '</i><span>' + esc(n) + '</span>');
+      l.appendChild(d);
+    });
+  },
+
+  phase: '',
+  status() {
+    if (!RUN) return;
+    const f = Ed.files.get(Ed.cur);
+    const errs = Ed.sq.filter(q => q.sev === 'e').length, warns = Ed.sq.filter(q => q.sev === 'w').length;
+    /* 상태바 언어 표시는 "지금 열려 있는 파일"을 따라간다. 모르는 확장자면
+       스택이 선언한 기본 언어로 떨어진다. */
+    const lang = {
+      ts: 'TypeScript React', py: 'Python', go: 'Go', rust: 'Rust', sql: 'SQL',
+      yaml: 'YAML', hcl: RUN.stack.langLabel === 'Bicep' ? 'Bicep' : 'Terraform',
+      toml: 'TOML', json: 'JSON', md: 'Markdown', sh: 'Shell Script', docker: 'Dockerfile',
+    };
+    const it = (h, cls) => '<div class="it ' + (cls || '') + '">' + h + '</div>';
+    $('status').innerHTML =
+      it('⧉ ' + esc(RUN.stack.org), 'rm') +
+      it('⑂ ' + esc(RUN.branch) + ' <span style="opacity:.75">↻ 1↓ 3↑</span>') +
+      it('<span style="opacity:.9">⊗ ' + errs + '</span> <span style="opacity:.9">⚠ ' + warns + '</span>') +
+      it('⟳ ' + esc(this.phase || 'Idle')) +
+      '<div class="sp"></div>' +
+      it('Ln ' + (Ed.caret.l + 1) + ', Col ' + (Ed.caret.c + 1)) +
+      it('Spaces: 2') + it('UTF-8') + it('LF') +
+      it(esc((f && lang[f.lang]) || lang[RUN.stack.lang] || RUN.stack.langLabel || 'Plain Text')) +
+      it('✓ Prettier') +
+      it('✦ ' + esc(CFG.agent)) +
+      it('🔔');
+  },
+
+  /* 창 제목. 여기에 이 프로그램의 이름이 새어 나오면 안 된다.
+     실제로 화면에 있어야 하는 것은 에디터·셸·tmux·대시보드의 제목뿐이다. */
+  title() {
+    if (!RUN) return;
+    const name = Ed.cur ? Ed.cur.split('/').pop() : RUN.stack.repo;
+    const d = Ed.cur && Ed.files.get(Ed.cur) && Ed.files.get(Ed.cur).dirty ? '● ' : '';
+    const t = $('tb-title');
+    if (CFG.layout === 'ide') t.textContent = d + name + ' — ' + RUN.stack.repo + ' — Visual Studio Code';
+    else if (CFG.layout === 'agent') t.textContent = 'agent — ' + RUN.stack.repo + ' — zsh — 204×54';
+    else if (CFG.layout === 'swarm') t.textContent = 'tmux: agents — ' + RUN.stack.repo + ' — 4 panes';
+    else if (CFG.layout === 'agi') t.textContent = 'fleet — ' + RUN.stack.org + ' — 342 agents — control';
+    else t.textContent = RUN.stack.org + '/' + RUN.stack.repo + ' — production — grafana';
+  },
+
+  /* 알림 */
+  toast(title, text, kind) {
+    if (!CFG.opts.notifs) return;
+    const ic = { ok: '✓', warn: '⚠', err: '✕', info: 'ⓘ' }[kind || 'info'];
+    const t = mkel('div', 'toast ' + (kind || 'info'),
+      '<div class="r1"><span class="ic">' + ic + '</span><span class="tx">' + esc(text) + '</span><span class="x">✕</span></div>' +
+      '<div class="src">Source: ' + esc(title) + '</div>');
+    $('toasts').appendChild(t);
+    setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 320); }, 7200);
+    while ($('toasts').childElementCount > 3) $('toasts').firstChild.remove();
+  },
+  ping(who, ch, text) {
+    if (!CFG.opts.pings) return;
+    const hue = [...who].reduce((a, c) => a + c.charCodeAt(0), 0) % 360;
+    const p = mkel('div', 'ping',
+      '<div class="h"><span class="av" style="background:hsl(' + hue + ',48%,62%)">' + esc(who[0].toUpperCase()) + '</span>' +
+      '<span class="n">' + esc(who) + '</span><span class="c">' + esc(ch) + '</span>' +
+      '<span class="t">' + hhmm(new Date()) + '</span></div>' +
+      '<div class="b">' + esc(text) + '</div>');
+    $('pings').appendChild(p);
+    setTimeout(() => { p.classList.add('out'); setTimeout(() => p.remove(), 320); }, 8600);
+    while ($('pings').childElementCount > 3) $('pings').firstChild.remove();
+  },
+
+  problems(list) {
+    const p = $('problems'); p.textContent = '';
+    const n = list.length;
+    $('pc-prob').textContent = n;
+    $('pc-prob').classList.toggle('on', n > 0);
+    if (!n) { p.appendChild(mkel('div', 'none', 'No problems have been detected in the workspace.')); Ed.setSquiggles([]); return; }
+    const byFile = {};
+    for (const it of list) (byFile[it.file] = byFile[it.file] || []).push(it);
+    for (const [file, items] of Object.entries(byFile)) {
+      const name = file.split('/').pop();
+      p.appendChild(mkel('div', 'f', iconHTML(name) + '<span>' + esc(name) + '</span>' +
+        '<span style="opacity:.5">' + esc(file.split('/').slice(0, -1).join('/')) + '</span>' +
+        '<span style="margin-left:auto;opacity:.6">' + items.length + '</span>'));
+      for (const it of items) {
+        p.appendChild(mkel('div', 'p',
+          '<span style="color:var(--u-' + (it.sev === 'e' ? 'red' : 'yellow') + ')">' + (it.sev === 'e' ? '⊗' : '⚠') + '</span>' +
+          '<span class="m">' + esc(it.msg) + '</span><span class="src">' + esc(it.src) + '</span>' +
+          '<span class="loc">[Ln ' + it.line + ', Col ' + it.col + ']</span>'));
+      }
+    }
+    Ed.setSquiggles(list);
+  },
+
+  panelTab(which) {
+    $('panel-tabs').querySelectorAll('.pt').forEach(t => t.classList.toggle('on', t.dataset.pv === which));
+    ['term', 'problems', 'output'].forEach(k => {
+      const n = $('pv-' + k); if (n) n.classList.toggle('on', k === which);
+    });
+  },
+
+  async palette() {
+    if (!CFG.opts.palette || CFG.layout !== 'ide') return;
+    const items = [...SCEN.PALETTE_ITEMS].sort(() => Math.random() - 0.5).slice(0, 7);
+    const q = pick(['>', '> git', '> test', '> format', '> agent', '> term']);
+    $('pal-q').innerHTML = esc(q) + '<span class="cur-blk"></span>';
+    $('pal-list').innerHTML = items.map((x, i) =>
+      '<div class="it' + (i === 0 ? ' on' : '') + '"><span>' + esc(x[0]) + '</span><span class="kb">' + esc(x[1]) + '</span></div>').join('');
+    $('palette').classList.add('on');
+    try { await wait(rnd(900, 1700)); } catch (e) { }
+    $('palette').classList.remove('on');
+  },
+
+  async hover(text, sig) {
+    const h = $('hover');
+    h.querySelector('.sig').innerHTML = '<span style="color:var(--t-fn)">' + esc(sig) + '</span>';
+    h.querySelector('.doc').textContent = text;
+    h.style.left = clamp(40 + Ed.caret.c * Ed.cw, 20, 400) + 'px';
+    h.style.top = clamp(Ed.caret.l * Ed.lh - Ed.off + 28, 10, 320) + 'px';
+    h.classList.add('on');
+    try { await wait(rnd(1400, 2600)); } catch (e) { }
+    h.classList.remove('on');
+  },
+};
+
+/* ════════════════════════════════════════════════════════════════════════
+   싱크 1 — IdeSink : 타이핑하는 VS Code
+   ════════════════════════════════════════════════════════════════════════ */
+class IdeSink {
+  constructor() {
+    this.term = new Stream($('term-out'), 260);
+    this.chat = $('chat-body');
+    this.cps = SCEN.PACES[CFG.pace].cps;
+    this.gap = SCEN.PACES[CFG.pace].gap;
+  }
+  reset(run) {
+    this.run = run;
+    this.cps = SCEN.PACES[CFG.pace].cps;
+    this.gap = SCEN.PACES[CFG.pace].gap;
+    this.chat.textContent = '';
+    this.term.clear();
+    Ed.reset();
+    UI.buildTree(run.stack);
+    UI.buildTerms(run.stack);
+    UI.problems([]);
+    UI.panelTab('term');
+    $('scm-badge').textContent = '0';
+    $('chat-model').textContent = CFG.model;
+    this.prompt(true);
+    this.footer();
+
+    /* 실제 에디터는 빈 상태로 있지 않다. 세션을 시작할 때 이미 열려 있던
+       파일이 있는 것처럼 주 구현 파일을 띄워 둔다. 미션이 어떤 명령부터
+       시작하든 첫 화면에 탭과 코드가 있어야 한다. */
+    const first = run.stack.files.impl || run.stack.files.types;
+    if (first) {
+      Ed.open(first.path, first.lang, first.code);
+      Ed.caret = { l: Math.min(18, Ed.files.get(first.path).lines.length - 1), c: 0 };
+      Ed.paint();
+      UI.selectTree(first.path);
+    }
+    UI.title();
+  }
+  /* 에이전트 패널 조각들 */
+  add(cls, html) { const d = mkel('div', cls, html); this.chat.appendChild(d); this.chat.scrollTop = this.chat.scrollHeight; return d; }
+  async stream(node, text, wps) {
+    const words = text.split(' ');
+    let acc = '';
+    for (let i = 0; i < words.length; i++) {
+      acc += (i ? ' ' : '') + words[i];
+      node.textContent = acc;
+      this.chat.scrollTop = this.chat.scrollHeight;
+      TOKENS += 1 + Math.ceil(words[i].length / 4);
+      await wait((1000 / (wps || 14)) * rnd(0.5, 1.8));
+    }
+  }
+  footer() {
+    $('chat-foot').innerHTML = '<span class="sp">' + (PAUSED ? '⏸' : '⏵') + '</span> ' +
+      esc(ktok()) + ' · ' + esc(elapsed()) + ' · <span style="opacity:.7">esc to interrupt</span>';
+  }
+  prompt(silent) {
+    const s = this.run ? this.run.stack : null; if (!s) return '';
+    const br = this.run.branch;
+    const p = '<span style="color:var(--u-green)">➜</span>  ' +
+      '<span style="color:var(--u-cyan)">' + esc(s.repo) + '</span> ' +
+      '<span style="color:var(--u-blue)">git:(</span><span style="color:var(--u-red)">' + esc(br) + '</span><span style="color:var(--u-blue)">)</span> ' +
+      '<span style="color:var(--u-yellow)">✗</span> ';
+    /* 비어 있는 프롬프트 줄은 하나만 남긴다. 실제 셸도 그렇다. */
+    if (silent) this.idle = this.term.raw(p + '<span class="cur-blk"></span>');
+    return p;
+  }
+  /** 명령을 칠 줄. 대기 중인 빈 프롬프트가 있으면 그 줄을 이어 쓴다. */
+  cmdLine() {
+    if (this.idle && this.idle.parentNode) { const n = this.idle; this.idle = null; return n; }
+    return this.term.raw('');
+  }
+
+  /* ── 비트 처리 ───────────────────────────────────────────────────── */
+  async phase(b) { UI.phase = b.label; UI.status(); }
+
+  async user(b) {
+    const d = this.add('cu', '<b>' + esc(CFG.user) + '</b><span></span>');
+    await this.stream(d.querySelector('span'), b.text, 22);
+  }
+
+  async think(b) {
+    const d = this.add('ct', '<span class="sp">✻</span><span></span>');
+    const sp = d.querySelector('.sp'), body = d.querySelector('span:last-child');
+    const frames = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'.split('');
+    let i = 0;
+    const iv = setInterval(() => { sp.textContent = frames[i++ % frames.length]; }, 90);
+    try { await this.stream(body, b.text, 17); await wait(b.ms * 0.25); }
+    finally { clearInterval(iv); }
+    sp.textContent = '✻';
+    d.innerHTML = '<span class="sp">✻</span><span>Thought for ' + Math.round(b.ms / 1000) + 's</span>';
+  }
+
+  async say(b) { const d = this.add('cs', ''); await this.stream(d, b.text, 15); }
+
+  async todo(b) {
+    const h = b.items.map(i =>
+      '<div class="i ' + (i.s === 'done' ? 'done' : i.s === 'doing' ? 'doing' : '') + '">' +
+      '<span class="bx">' + (i.s === 'done' ? '☒' : i.s === 'doing' ? '▸' : '☐') + '</span>' +
+      '<span>' + esc(i.text) + '</span></div>').join('');
+    this.add('todo', h);
+    await wait(420);
+  }
+
+  tool(name, arg) { return this.add('tool', '<span class="b">●</span> <span class="n">' + esc(name) + '</span>(' + esc(arg) + ')'); }
+  result(text) { this.add('res', '⎿  ' + esc(text)); }
+
+  async read(b) { this.tool('Read', b.path); await wait(500); this.result('Read ' + b.lines + ' lines'); TOKENS += b.lines * 9; await wait(300); }
+  async grep(b) { this.tool('Grep', 'pattern: "' + b.pat + '"'); await wait(560); this.result('Found ' + b.hits + ' matches across ' + ri(2, 5) + ' files'); await wait(280); }
+  async ls(b) { this.tool('Bash', 'ls -la ' + b.path); await wait(420); this.result(b.n + ' entries'); await wait(220); }
+
+  async open(b) {
+    this.tool('Read', b.path);
+    Ed.open(b.path, b.lang, b.code);
+    UI.selectTree(b.path); UI.title();
+    await wait(620);
+    this.result('Read ' + b.lines + ' lines');
+    TOKENS += b.lines * 9;
+    const doc = this.run && this.run.stack.topic && this.run.stack.topic.hover;
+    if (doc && Math.random() < 0.4) UI.hover(doc, b.path.split('/').pop());
+    await wait(340);
+  }
+
+  async edit(b) {
+    if (Math.random() < 0.3) UI.palette();
+    this.tool(b.fresh ? 'Write' : 'Update', b.path);
+
+    /* 어디부터 다시 쓸지 정한다. 세 가지 경우가 있다.
+       ─ 새 파일이거나 아직 열지 않은 파일  → 빈 버퍼에서 처음부터
+       ─ 이미 화면에 같은 내용이 열려 있다  → 뒤쪽 한 덩어리를 지우고
+                                              그 지점부터 다시 쓴다
+       ─ 다른 내용이 열려 있다              → 끝의 del 줄을 지우고 덧붙인다
+       이렇게 해야 같은 파일을 두 번 고칠 때 내용이 중복되지 않는다. */
+    let from = 0;
+    const f0 = Ed.files.get(b.path);
+    if (b.fresh || !f0) {
+      Ed.open(b.path, b.lang, '');
+      const f = Ed.files.get(b.path); f.lines = []; f.marks = [];
+      $('code').textContent = ''; $('gutter').textContent = ''; $('mm-lines').textContent = '';
+    } else if (f0.lines.join('\n') === b.code) {
+      Ed.openTab(b.path);
+      const total = f0.lines.length;
+      from = Math.max(1, Math.floor(total * rnd(0.42, 0.68)));
+      await Ed.replaceTail(b.path, total - from);
+    } else if (b.del) {
+      Ed.openTab(b.path);
+      await Ed.replaceTail(b.path, b.del);
+    }
+    UI.selectTree(b.path); UI.title();
+    await Ed.type(b.path, b.lang, b.code, this.cps, from);
+    this.result(b.fresh
+      ? 'Wrote ' + b.path + ' (' + b.add + ' lines)'
+      : 'Updated ' + b.path + ' with ' + b.add + ' additions and ' + b.del + ' removals');
+    const n = Number($('scm-badge').textContent) + 1;
+    $('scm-badge').textContent = n;
+    UI.toast('Prettier', 'Formatted ' + b.path.split('/').pop(), 'info');
+    Ed.markDirty(b.path, false);
+    UI.title();
+    await wait(300 * this.gap);
+  }
+
+  async bash(b) {
+    UI.panelTab('term');
+    this.tool('Bash', b.cmd.length > 74 ? b.cmd.slice(0, 71) + '...' : b.cmd);
+    const node = this.cmdLine();
+    await this.term.typeInto(node, b.cmd, this.cps * 1.25, this.prompt());
+    Sound.enter();
+    await wait(230);
+    await this.term.spill(b.out, b.ms);
+    CMDS++;
+    if (b.role === 'test_pass' || b.role === 'test_fail') TESTS++;
+    if (b.role === 'commit') { COMMITS++; $('scm-badge').textContent = '0'; }
+    const sum = {
+      test_pass: 'all tests passed', test_fail: 'tests failed — as expected',
+      commit: 'commit created', push: 'branch pushed', types_ok: '0 errors',
+      types: 'type errors found', lint_ok: 'no problems found', lint: 'lint findings',
+      deploy: 'rollout complete', cov: 'coverage gate met', bench: 'benchmark recorded',
+    }[b.role] || (b.out.length + ' lines of output');
+    this.result(sum);
+    await wait(180);
+    this.prompt(true);
+    await wait(420 * this.gap);
+  }
+
+  async problems(b) { UI.problems(b.items); if (b.items.length) { UI.panelTab('problems'); await wait(1500); UI.panelTab('term'); } }
+  async notify(b) { UI.toast(b.title, b.text, b.kind); await wait(320); }
+  async ping(b) { UI.ping(b.who, b.ch, b.text); await wait(420); }
+  async wait(b) { await wait(b.ms); }
+
+  async done(b) {
+    const d = this.add('fin', '<div class="t">Session complete</div><div class="x"></div>' +
+      '<div class="s">' + (b.stats || []).map(s => '<span>' + esc(s) + '</span>').join('') + '</div>');
+    await this.stream(d.querySelector('.x'), b.text, 16);
+    UI.phase = 'Done';
+    UI.status();
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   싱크 2 — StreamSink : 타이핑 없는 에이전트 출력
+   ────────────────────────────────────────────────────────────────────────
+   Claude Code / Codex 같은 CLI 에이전트 세션을 그대로 흉내낸다. 손으로
+   치는 장면이 하나도 없고, 툴 호출과 결과만 끝없이 흘러내린다.
+   헤드리스 · 스웜 · Ops 레이아웃이 전부 이 싱크를 쓴다.
+   ════════════════════════════════════════════════════════════════════════ */
+class StreamSink {
+  constructor(stream, opts) {
+    this.s = stream;
+    this.o = opts || {};
+    this.gap = SCEN.PACES[CFG.pace].gap;
+    this.rate = SCEN.PACES[CFG.pace].cps;
+    this.compact = !!this.o.compact;
+    this.micro = !!this.o.micro;     // 플릿 판용 — 툴 호출 줄만, 산문 없음
+  }
+  reset(run) { this.run = run; if (!this.o.keep) this.s.clear(); }
+  /** 판 머리글이 단계 이름을 따라가도록 알린다. */
+  sayPhase(label) { const h = this.onPhase || this.o.header; if (h) h(label); }
+  /** micro 모드에서 긴 문장을 한 줄로 줄인다. */
+  short(t, n) { const s = String(t); return s.length > (n || 62) ? s.slice(0, (n || 62) - 1) + '…' : s; }
+
+  /* 흘리는 속도: pace 의 cps 를 "초당 줄 수"로 환산한다 */
+  perLine() { return clamp(1000 / (this.rate * 0.42), 12, 260); }
+
+  async lines(arr, indent) {
+    for (const l of arr) { await gate(); this.s.raw((indent || '') + mk(l)); TOKENS += 7; await wait(this.perLine() * rnd(0.4, 1.7)); }
+  }
+  async words(prefix, text, cls) {
+    const node = this.s.raw(prefix);
+    const words = text.split(' ');
+    let acc = '';
+    for (let i = 0; i < words.length; i++) {
+      acc += (i ? ' ' : '') + words[i];
+      node.innerHTML = prefix + (cls ? '<span style="' + cls + '">' + esc(acc) + '</span>' : esc(acc));
+      this.s.follow();
+      TOKENS += 1 + Math.ceil(words[i].length / 4);
+      await wait((1000 / (this.rate * 1.1)) * rnd(0.5, 1.9));
+    }
+    return node;
+  }
+  tool(name, arg) { this.s.raw('<span style="color:var(--u-green)">●</span> <span style="color:var(--u-fg)">' + esc(name) + '</span>(' + mk(arg) + ')'); }
+  res(text) { this.s.raw('  <span style="opacity:.55">⎿  ' + mk(text) + '</span>'); }
+
+  async phase(b) {
+    this.phaseName = b.label;
+    this.sayPhase(b.label);
+    if (this.compact) return;
+    this.s.blank();
+    this.s.raw('<span style="color:var(--u-accent);opacity:.9">━━ ' + esc(b.label.toUpperCase()) + ' ' +
+      '─'.repeat(Math.max(2, 44 - b.label.length)) + '</span>');
+    await wait(280);
+  }
+  async user(b) {
+    if (this.micro) { this.s.line('{{c|>}} {{d|' + this.short(b.text, 58) + '}}'); await wait(120); return; }
+    this.s.blank();
+    await this.words('<span style="color:var(--u-accent)">&gt;</span> ', b.text, 'color:var(--u-fg)');
+    this.s.blank();
+  }
+  async think(b) {
+    if (this.micro) { this.s.line('{{m|✻}} {{d|thinking ' + Math.round(b.ms / 1000) + 's}}'); await wait(b.ms * 0.12); return; }
+    const frames = '⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'.split('');
+    const node = this.s.raw('');
+    let i = 0, t0 = Date.now();
+    const iv = setInterval(() => {
+      node.innerHTML = '<span style="color:var(--u-magenta)">' + frames[i++ % frames.length] +
+        '</span> <span style="opacity:.6;font-style:italic">Thinking… (' + Math.round((Date.now() - t0) / 1000) + 's · ' + ktok() + ')</span>';
+    }, 90);
+    try { await wait(b.ms * 0.5); } finally { clearInterval(iv); }
+    node.innerHTML = '<span style="color:var(--u-magenta)">✻</span> <span style="opacity:.6;font-style:italic">Thought for ' + Math.round(b.ms / 1000) + 's</span>';
+    if (!this.compact) { await this.words('  <span style="opacity:.45">│ </span>', b.text, 'opacity:.55;font-style:italic'); }
+    await wait(180);
+  }
+  async say(b) {
+    if (this.micro) { this.s.line('{{d|' + this.short(b.text, 60) + '}}'); await wait(140); return; }
+    this.s.blank(); await this.words('', b.text, 'color:var(--u-fg)');
+  }
+  async todo(b) {
+    if (this.micro) { const d = b.items.find(i => i.s === 'doing'); if (d) this.s.line('{{y|▸}} ' + this.short(d.text, 52)); await wait(90); return; }
+    this.s.blank();
+    for (const i of b.items) {
+      const bx = i.s === 'done' ? '{{g|☒}}' : i.s === 'doing' ? '{{y|▸}}' : '{{d|☐}}';
+      const tx = i.s === 'done' ? '{{d|' + i.text + '}}' : i.text;
+      this.s.line('  ' + bx + ' ' + tx);
+      await wait(110);
+    }
+    this.s.blank();
+  }
+  async read(b) { this.tool('Read', b.path); await wait(420); this.res('Read {{w|' + b.lines + '}} lines'); TOKENS += b.lines * 9; await wait(240); }
+  async open(b) { await this.read({ path: b.path, lines: b.lines }); }
+  async grep(b) { this.tool('Grep', 'pattern: "{{y|' + b.pat + '}}"'); await wait(460); this.res('Found {{w|' + b.hits + '}} matches across ' + ri(2, 5) + ' files'); await wait(220); }
+  async ls(b) { this.tool('Bash', 'ls -la ' + b.path); await wait(380); this.res(b.n + ' entries'); await wait(200); }
+
+  /** 타이핑이 없으므로, 코드 변경은 통합 diff 로 뱉는다. */
+  async edit(b) {
+    this.tool(b.fresh ? 'Write' : 'Update', b.path);
+    await wait(380);
+    /* 통합 diff 한 덩어리. 삭제 줄은 같은 파일의 다른 구간에서 가져온다.
+       글자를 망가뜨려 "옛 코드"를 흉내내면 오타처럼 보이고, 그 한 줄이
+       화면 전체를 가짜로 만든다. */
+    const src = b.code.split('\n').filter((l, i, a) => l.trim() || (a[i - 1] || '').trim());
+    const show = Math.min(src.length, this.micro ? 2 : this.compact ? 6 : 16);
+    const start = ri(24, 96);
+    const gut = n => '<span style="opacity:.42">' + String(n).padStart(6) + ' </span>';
+
+    if (!b.fresh && b.del) {
+      const cut = clamp(b.del, 1, this.compact ? 2 : 4);
+      const at = Math.max(0, src.length - cut - 1);
+      this.s.raw('<span style="color:var(--u-cyan)">@@ -' + start + ',' + cut + ' +' + start + ',' + show + ' @@</span>');
+      for (let i = 0; i < cut; i++) {
+        this.s.raw(gut(start + i) + '<span style="color:var(--u-red)">- ' + esc(src[at + i] || '') + '</span>');
+        await wait(this.perLine() * 0.8);
+      }
+    }
+    for (let i = 0; i < show; i++) {
+      await gate();
+      this.s.raw(gut(start + i) + '<span style="color:var(--u-green)">+ ' + esc(src[i]) + '</span>');
+      TOKENS += 6 + Math.ceil(src[i].length / 3.6);
+      await wait(this.perLine() * rnd(0.5, 1.5));
+    }
+    if (src.length > show) this.s.raw('<span style="opacity:.4">       … +' + (src.length - show) + ' more lines</span>');
+    this.res(b.fresh
+      ? 'Wrote {{w|' + b.path + '}} ({{g|' + b.add + '}} lines)'
+      : 'Updated {{w|' + b.path + '}} with {{g|' + b.add + ' additions}} and {{r|' + b.del + ' removals}}');
+    EDITS++;
+    await wait(260 * this.gap);
+  }
+
+  async bash(b) {
+    this.tool('Bash', b.cmd.length > 88 ? b.cmd.slice(0, 85) + '…' : b.cmd);
+    await wait(280);
+    const cut = this.micro ? 3 : this.compact ? 8 : b.out.length;
+    const out = b.out.slice(0, cut);
+    await this.lines(out, '  <span style="opacity:.3">│</span> ');
+    if (b.out.length > cut) this.s.raw('  <span style="opacity:.35">│ … ' + (b.out.length - cut) + ' more lines</span>');
+    CMDS++;
+    if (b.role === 'test_pass' || b.role === 'test_fail') TESTS++;
+    if (b.role === 'commit') COMMITS++;
+    this.res('{{d|exit 0 · ' + b.out.length + ' lines · ' + (b.ms / 1000).toFixed(1) + 's}}');
+    await wait(300 * this.gap);
+  }
+
+  async problems(b) {
+    if (!b.items.length || this.micro) return;
+    this.s.blank();
+    for (const p of b.items) {
+      this.s.line((p.sev === 'e' ? '{{r|error}}' : '{{y|warn }}') + ' {{w|' + p.file + '}}:' + p.line + ':' + p.col + '  ' + p.msg + ' {{d|' + p.src + '}}');
+      await wait(160);
+    }
+  }
+  async notify(b) { if (!this.o.noToast) UI.toast(b.title, b.text, b.kind); this.s.line('{{d|[' + hhmmss(new Date()) + ']}} {{c|' + b.title + '}} ' + b.text); await wait(240); }
+  async ping(b) { if (!this.o.noToast) UI.ping(b.who, b.ch, b.text); await wait(300); }
+  async wait(b) { await wait(b.ms); }
+  async done(b) {
+    if (this.micro) { this.s.line('{{g|⏺}} {{d|' + this.short(b.text, 56) + '}}'); await wait(180); return; }
+    this.s.blank();
+    await this.words('<span style="color:var(--u-green)">⏺</span> ', b.text, 'color:var(--u-fg)');
+    if (b.stats && !this.compact) { this.s.blank(); this.s.line('  {{d|' + b.stats.join('  ·  ') + '}}'); }
+    this.s.blank();
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Director — 비트를 재생한다
+   ════════════════════════════════════════════════════════════════════════ */
+class Director {
+  constructor(sink) { this.sink = sink; }
+  async play(run) {
+    this.sink.reset(run);
+    for (const b of run.beats) {
+      await gate();
+      const h = this.sink[b.t];
+      if (h) await h.call(this.sink, b);
+      await wait(120 * (this.sink.gap || 1));
+    }
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Ops 레이아웃 — 파이프라인 · 로그 꼬리 · 지표
+   ════════════════════════════════════════════════════════════════════════ */
+const Ops = {
+  timers: [],
+  stop() { this.timers.forEach(clearInterval); this.timers.length = 0; },
+
+  start(stack) {
+    this.stop();
+    $('ops-top').textContent = '';
+    this.m = SCEN.METRICS.map(m => ({ ...m, hist: Array.from({ length: 44 }, () => m.v) }));
+    for (const m of this.m) {
+      const t = mkel('div', 'tile ok', '<div class="k">' + esc(m.k) + '</div><div class="v">—</div><canvas></canvas>');
+      $('ops-top').appendChild(t); m.el = t;
+      m.cv = t.querySelector('canvas');
+    }
+    this.tick();
+    this.timers.push(setInterval(() => { if (!PAUSED) this.tick(); }, 1600));
+
+    /* 로그 꼬리 */
+    this.log = new Stream($('ops-log'), 90);
+    this.logT = stack.logtail;
+    this.timers.push(setInterval(() => {
+      if (PAUSED) return;
+      const n = ri(1, 3);
+      for (let i = 0; i < n; i++) this.log.line(this.fill(pick(this.logT)));
+      $('log-meta').textContent = (8000 + ri(0, 1400)) + ' lines/min · payments';
+    }, 620));
+
+    /* 파이프라인 */
+    this.pipe(stack);
+  },
+
+  /* 로그 시각은 단조 증가해야 한다. 매번 난수를 찍으면 줄 순서가 시간과
+     어긋나고, 로그를 읽는 사람은 그걸 바로 알아본다. */
+  stamp() {
+    const now = Date.now();
+    if (!this._ms || now > this._ms) this._ms = now;
+    this._ms += ri(8, 90);
+    const d = new Date(this._ms);
+    return hhmmss(d) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+  },
+  fill(tpl) {
+    return tpl
+      .replace(/\$t/g, this.stamp())
+      .replace(/\$ms/g, String(ri(4, 148)))
+      .replace(/\$a/g, String(ri(1, 3)))
+      .replace(/\$b/g, String(ri(11, 240)))
+      .replace(/\$h/g, Math.random().toString(16).slice(2, 6))
+      .replace(/\$n/g, String(ri(1, 9)));
+  },
+
+  tick() {
+    for (const m of this.m) {
+      const span = m.hi - m.lo;
+      m.v = clamp(m.v + rnd(-span * 0.12, span * 0.12), m.lo, m.hi);
+      m.hist.push(m.v); if (m.hist.length > 44) m.hist.shift();
+      const f = m.fmt;
+      const txt = f === 'int' ? Math.round(m.v).toLocaleString()
+        : f === 'ms' ? Math.round(m.v) + '<small>ms</small>'
+          : f === 'pct' ? m.v.toFixed(2) + '<small>%</small>'
+            : m.v.toFixed(1) + '<small>%</small>';
+      m.el.querySelector('.v').innerHTML = txt;
+      const r = (m.v - m.lo) / span;
+      const good = m.good === 'hi' ? r > 0.45 : m.good === 'lo' ? r < 0.55 : r > 0.2 && r < 0.8;
+      m.el.className = 'tile ' + (good ? 'ok' : r > 0.82 || r < 0.18 ? 'bad' : 'warn');
+      this.spark(m);
+    }
+  },
+  spark(m) {
+    const c = m.cv, dpr = devicePixelRatio || 1;
+    const w = c.clientWidth, h = c.clientHeight;
+    if (!w) return;
+    c.width = w * dpr; c.height = h * dpr;
+    const x = c.getContext('2d'); x.scale(dpr, dpr); x.clearRect(0, 0, w, h);
+    const lo = Math.min(...m.hist), hi = Math.max(...m.hist), sp = Math.max(1e-6, hi - lo);
+    x.beginPath();
+    m.hist.forEach((v, i) => {
+      const px = (i / (m.hist.length - 1)) * w, py = h - 1 - ((v - lo) / sp) * (h - 3);
+      i ? x.lineTo(px, py) : x.moveTo(px, py);
+    });
+    const col = getComputedStyle(m.el.querySelector('.v')).color;
+    x.strokeStyle = col; x.globalAlpha = .78; x.lineWidth = 1.2; x.stroke();
+    x.lineTo(w, h); x.lineTo(0, h); x.closePath();
+    x.globalAlpha = .12; x.fillStyle = col; x.fill();
+  },
+
+  async pipe(stack) {
+    const list = $('pipe-list');
+    const run = () => {
+      list.textContent = '';
+      this.stages = SCEN.PIPELINE.map(s => ({ ...s, st: 'wait', d: '' }));
+      for (const s of this.stages) {
+        s.el = mkel('div', 'st wait', '<span class="i">○</span><span class="n">' + esc(s.name) + '</span><span class="d"></span>');
+        list.appendChild(s.el);
+      }
+    };
+    run();
+    const g = GEN;
+    let build = 4118;
+    while (g === GEN) {
+      $('pipe-meta').textContent = '#' + build + ' · ' + this.run3;
+      for (const s of this.stages) {
+        if (g !== GEN) return;
+        s.el.className = 'st run'; s.el.querySelector('.i').textContent = '◐';
+        $('pipe-meta').textContent = '#' + build + ' · running · ' + s.name;
+        const t0 = Date.now();
+        const spin = setInterval(() => {
+          s.el.querySelector('.d').textContent = ((Date.now() - t0) / 1000).toFixed(0) + 's';
+        }, 400);
+        try { await wait(s.ms); } catch (e) { clearInterval(spin); return; }
+        clearInterval(spin);
+        s.el.className = 'st ok'; s.el.querySelector('.i').textContent = '✓';
+        s.el.querySelector('.d').textContent = (s.ms / 1000).toFixed(0) + 's';
+        this.log.line('{{gr|' + hhmmss(new Date()) + '}} {{g|CI}}    ' +
+          s.log.replace('${repo}', stack.repo) + ' {{d|[' + s.name + ']}}');
+      }
+      $('pipe-meta').textContent = '#' + build + ' · passed';
+      UI.toast('GitHub Actions', 'Build #' + build + ' passed on ' + (RUN ? RUN.branch : 'main'), 'ok');
+      try { await wait(9000); } catch (e) { return; }
+      build++;
+      run();
+    }
+  },
+};
+
+/* ════════════════════════════════════════════════════════════════════════
+   스웜 레이아웃 — tmux 4분할
+   ════════════════════════════════════════════════════════════════════════ */
+const Swarm = {
+  panes: [],
+  build(stack, missionId) {
+    const grid = $('sw-grid'); grid.textContent = '';
+    this.panes = [];
+    const set = SCEN.swarmSet(missionId);
+    const names = [...SCEN.AGENT_NAMES].sort(() => Math.random() - 0.5);
+    set.forEach((mid, i) => {
+      const m = SCEN.MISSIONS[mid];
+      const p = mkel('div', 'pane' + (i === 0 ? ' act' : ''),
+        '<div class="ph"><span>' + i + ':</span><span class="n">' + esc(names[i]) + '</span>' +
+        '<span style="opacity:.7">' + esc(m.label) + '</span><span class="st">—</span></div>' +
+        '<div class="po"></div>');
+      grid.appendChild(p);
+      this.panes.push({ mid, el: p, out: p.querySelector('.po'), head: p.querySelector('.st'), name: names[i] });
+    });
+    /* tmux 상태줄 */
+    const st = $('sw-status');
+    st.innerHTML = '<span class="s">[swarm]</span>' +
+      '<span class="w on">0:agents*</span><span class="w">1:logs</span><span class="w">2:k9s</span>' +
+      '<span class="sp"></span><span class="w" id="sw-clock"></span>';
+    setInterval(() => { const c = $('sw-clock'); if (c) c.textContent = '"' + CFG.user + '@mbp" ' + hhmm(new Date()); }, 1000);
+    const c = $('sw-clock'); if (c) c.textContent = '"' + CFG.user + '@mbp" ' + hhmm(new Date());
+  },
+
+  /* 판마다 독립적인 디렉터를 돌린다. 시작 시간을 어긋나게 해서
+     네 판이 동시에 같은 줄을 뱉지 않도록 한다. */
+  async runPane(p, stackId, bump) {
+    const s = new Stream(p.out, 46);
+    const sink = new StreamSink(s, {
+      compact: true, noToast: true, keep: false,
+      header: label => { p.head.textContent = label; },
+    });
+    const dir = new Director(sink);
+    const g = GEN;
+    let mid = p.mid, n = bump;
+    await wait(rnd(200, 2600));
+    while (g === GEN) {
+      const run = I18N.localize(SCEN.build(stackId, mid, { bump: n }), CFG.lang);
+      p.el.querySelector('.ph .n').textContent = p.name;
+      p.el.querySelector('.ph .tkt') && (p.el.querySelector('.ph .tkt').textContent = run.ticket.id);
+      try { await dir.play(run); } catch (e) { if (e === ABORT) return; throw e; }
+      if (!CFG.opts.loop) { p.head.textContent = 'done'; return; }
+      mid = SCEN.nextMission(mid); n++;
+      await wait(rnd(1200, 3600));
+    }
+  },
+};
+
+/* ════════════════════════════════════════════════════════════════════════
+   AGI 자율 플릿 — agi 레이아웃
+   ────────────────────────────────────────────────────────────────────────
+   다른 레이아웃은 에이전트 한 대가 일하는 과정을 보여준다. 이건 그 규모를
+   보여준다. 아홉 개의 판이 각자 다른 저장소의 다른 티켓을 돌리고, 위쪽
+   집계는 한 팀이 낼 수 없는 숫자를 올리고, 아래쪽은 머지 큐가 흐른다.
+   숫자가 올라가는 속도 자체가 메시지다.
+   ════════════════════════════════════════════════════════════════════════ */
+const Fleet = {
+  timers: [], panes: [],
+  stop() { this.timers.forEach(clearInterval); this.timers.length = 0; },
+
+  start() {
+    this.stop();
+    const F = SCEN.FLEET;
+
+    /* 집계 타일 */
+    const head = $('agi-head'); head.textContent = '';
+    const scale = clamp((CFG.fleet | 0) / 9, 1, 11);
+    this.tiles = F.tiles.map(t => ({
+      ...t, cur: t.fmt === 'acc' ? 0 : Math.round((t.v || 0) * (t.fmt === 'pct2' ? 1 : scale)),
+      lo: t.lo != null ? Math.round(t.lo * (t.fmt === 'pct2' ? 1 : scale)) : t.lo,
+      hi: t.hi != null ? Math.round(t.hi * (t.fmt === 'pct2' ? 1 : scale)) : t.hi,
+      inc: t.inc ? [Math.round(t.inc[0] * scale), Math.round(t.inc[1] * scale)] : t.inc,
+    }));
+    for (const t of this.tiles) {
+      t.el = mkel('div', 't' + (t.fmt === 'acc' ? ' hot' : ''),
+        '<div class="k">' + esc(t.k) + '</div><div class="v">—</div><div class="d"></div>');
+      head.appendChild(t.el);
+    }
+
+    /* 판. 개수에 따라 격자와 글씨 크기가 같이 줄어든다. 100대까지는
+       한 판에 세 줄만 남지만, 그 세 줄이 백 개 동시에 흐른다. */
+    const n = clamp(CFG.fleet | 0, 1, 100);
+    const cols = Math.ceil(Math.sqrt(n));
+    const rows = Math.ceil(n / cols);
+    const grid = $('agi-grid'); grid.textContent = '';
+    grid.style.gridTemplateColumns = 'repeat(' + cols + ',minmax(0,1fr))';
+    grid.style.gridTemplateRows = 'repeat(' + rows + ',minmax(0,1fr))';
+    const tiny = n > 48 ? 8 : n > 24 ? 9 : 10;
+    grid.style.setProperty('--ap-fs', tiny + 'px');
+    grid.style.setProperty('--ap-lh', (tiny + 3) + 'px');
+    grid.classList.toggle('dense', n > 24);
+    this.panes = [];
+    const names = [...SCEN.AGENT_NAMES].sort(() => Math.random() - 0.5);
+    const stacks = Object.keys(SCEN.STACKS);
+    for (let i = 0; i < n; i++) {
+      const el = mkel('div', 'ap',
+        '<div class="h"><span class="n"></span><span class="tk"></span><span class="w"></span></div><div class="o"></div>');
+      grid.appendChild(el);
+      this.panes.push({
+        el, name: names[i % names.length], stack: stacks[i % stacks.length],
+        out: el.querySelector('.o'), hn: el.querySelector('.n'),
+        ht: el.querySelector('.tk'), hw: el.querySelector('.w'),
+      });
+    }
+
+    /* 머지 큐 소방호스 */
+    this.ev = new Stream($('agi-ev'), 60);
+    $('agi-ev-title').textContent = T('ui.mergequeue', 'Merge queue');
+    this.merged = 0;
+    this.timers.push(setInterval(() => {
+      if (PAUSED) return;
+      const n = ri(1, 3);
+      for (let i = 0; i < n; i++) { this.ev.raw(this.event(F)); this.merged++; }
+      $('agi-ev-meta').textContent = this.merged.toLocaleString() + ' events · ' +
+        (ri(180, 340)) + '/min · ' + hhmmss(new Date());
+    }, 500));
+
+    this.tick();
+    this.timers.push(setInterval(() => { if (!PAUSED) this.tick(); }, 900));
+    this.panes.forEach((p, i) => this.runPane(p, i).catch(e => { if (e !== ABORT) console.error(e); }));
+  },
+
+  event(F) {
+    const repo = pick(F.repos);
+    const tk = pick(F.tickets) + '-' + ri(100, 4999);
+    return '<span style="opacity:.5">' + this.hhmm() + '</span> ' + mk(pick(F.events)
+      .replace(/\$p/g, String(ri(1200, 8999)))
+      .replace(/\$r/g, repo)
+      .replace(/\$a/g, String(ri(12, 840)))
+      .replace(/\$d/g, String(ri(4, 310)))
+      .replace(/\$ms/g, String(ri(18, 240)))
+      .replace(/\$sha/g, Math.random().toString(16).slice(2, 9))
+      .replace(/\$b/g, String(ri(1000, 9999)))
+      .replace(/\$t2/g, pick(F.tickets) + '-' + ri(100, 4999))
+      .replace(/\$t/g, tk)
+      .replace(/\$c/g, String(ri(90, 99)))
+      .replace(/\$n/g, String(ri(2, 71))));
+  },
+  hhmm() { const d = new Date(); return hhmmss(d); },
+
+  tick() {
+    for (const t of this.tiles) {
+      if (t.fmt === 'acc') {
+        t.cur += ri(t.inc[0], t.inc[1]);
+        t.el.querySelector('.v').textContent = t.cur.toLocaleString();
+        t.el.querySelector('.d').textContent = '+' + ri(t.inc[0], t.inc[1]).toLocaleString() + '/s';
+      } else {
+        const span = t.hi - t.lo;
+        t.cur = clamp(t.cur + rnd(-span * 0.1, span * 0.1), t.lo, t.hi);
+        const v = t.fmt === 'pct2' ? t.cur.toFixed(2) + '<small>%</small>' : Math.round(t.cur).toLocaleString();
+        t.el.querySelector('.v').innerHTML = v;
+        t.el.querySelector('.d').textContent = t.fmt === 'pct2' ? 'last 24h' : 'now';
+      }
+    }
+  },
+
+  /** 판 하나. 짧은 툴 호출 줄만 뱉는 초압축 싱크를 쓴다. */
+  async runPane(p, idx) {
+    const s = new Stream(p.out, this.panes.length > 24 ? 12 : 34);
+    const sink = new StreamSink(s, { compact: true, micro: true, noToast: true });
+    const dir = new Director(sink);
+    const g = GEN;
+    let mid = SCEN.MISSION_ORDER[idx % SCEN.MISSION_ORDER.length];
+    let bump = idx;
+    await wait(rnd(60, 1400));
+    while (g === GEN) {
+      const run = SCEN.build(p.stack, mid, { bump });
+      I18N.localize(run, CFG.lang);
+      p.hn.textContent = p.name;
+      p.ht.textContent = run.ticket.id;
+      sink.onPhase = l => { p.hw.textContent = l.toLowerCase(); };
+      try { await dir.play(run); } catch (e) { if (e === ABORT) return; throw e; }
+      p.hw.textContent = 'merged';
+      MISSION_N++;
+      await wait(rnd(300, 1200));
+      mid = SCEN.nextMission(mid); bump++;
+    }
+  },
+};
+
+/* ════════════════════════════════════════════════════════════════════════
+   패닉 모드 — ` 키
+   ────────────────────────────────────────────────────────────────────────
+   누가 다가올 때. 터미널을 최대로 키우고 빌드/배포 로그를 쏟아붓는다.
+   읽을 수 없는 속도로 흐르는 초록색 로그만큼 바빠 보이는 것은 없다.
+   ════════════════════════════════════════════════════════════════════════ */
+const Panic = {
+  on: false, prevSpeed: 1, iv: null,
+  toggle() {
+    this.on ? this.off_() : this.on_();
+  },
+  on_() {
+    if (!RUN) return;
+    this.on = true; this.prevSpeed = SPEED; SPEED = 7;
+    $('panel').classList.add('max'); $('side').classList.add('hide'); $('chat').classList.add('hide');
+    UI.panelTab('term');
+    const pool = ['build', 'deploy', 'test_pass', 'push', 'migrate', 'cov'].map(r => RUN.stack.cmd[r]).filter(Boolean);
+    const target = { ide: 'term-out', agent: 'ag-out', swarm: 'agi-ev', ops: 'ops-log', agi: 'agi-ev' }[CFG.layout] || 'term-out';
+    const ags = new Stream($(target), 400);
+    this.iv = setInterval(() => {
+      if (PAUSED) return;
+      const c = pick(pool);
+      const l = pick(c.out);
+      ags.line(l);
+      if (Math.random() < 0.06) ags.line('{{g|➜}}  ' + RUN.stack.repo + ' {{d|' + c.cmd.slice(0, 68) + '}}');
+    }, 46);
+    UI.toast('Workspace', T('msg.panic', 'Focus mode — terminal maximised. Press ` again to go back.'), 'warn');
+  },
+  off_() {
+    this.on = false; SPEED = this.prevSpeed;
+    clearInterval(this.iv); this.iv = null;
+    $('panel').classList.remove('max');
+    if (CFG.layout === 'ide') { $('side').classList.remove('hide'); $('chat').classList.remove('hide'); }
+  },
+};
+
+/* ════════════════════════════════════════════════════════════════════════
+   런처
+   ════════════════════════════════════════════════════════════════════════ */
+/** 선택지의 이름·설명을 현재 언어로. 사전에 없으면 영어 원문. */
+function locMeta(kind, id, v) {
+  const m = I18N.meta(CFG.lang, kind, id);
+  return m || { label: v.label, hint: v.hint };
+}
+const paceLabel = k => locMeta('pace', k, SCEN.PACES[k]).label;
+const FLEET_SIZES = [9, 24, 48, 100];
+
+const Launcher = {
+  build() {
+    /* 모델 */
+    const sel = $('in-model');
+    if (!sel.options.length) SCEN.MODELS.forEach(m => sel.appendChild(mkel('option', null, m)));
+    sel.value = CFG.model;
+
+    const chips = (host, hintHost, entries, cur, set, kind) => {
+      const h = $(host); h.textContent = '';
+      const info = (k, v) => kind ? locMeta(kind, k, v) : { label: v.label, hint: v.hint };
+      const hi = (k, v) => { const m = info(k, v); return '<b>' + esc(m.label) + '</b>' + (m.hint ? ' — ' + esc(m.hint) : ''); };
+      for (const [k, v] of entries) {
+        const m = info(k, v);
+        const c = mkel('button', 'chip' + (k === cur ? ' on' : ''),
+          (v.icon ? '<span class="em">' + v.icon + '</span>' : '') + esc(m.label));
+        c.onclick = () => { set(k); this.build(); };
+        c.onmouseenter = () => { if (hintHost) $(hintHost).innerHTML = hi(k, v); };
+        h.appendChild(c);
+      }
+      if (hintHost) {
+        const e = entries.find(x => x[0] === cur);
+        $(hintHost).innerHTML = e ? hi(e[0], e[1]) : '';
+      }
+    };
+
+    chips('g-layout', 'h-layout', Object.entries(SCEN.LAYOUTS), CFG.layout, k => CFG.layout = k, 'layout');
+    chips('g-stack', 'h-stack', Object.entries(SCEN.STACKS), CFG.stack, k => CFG.stack = k, 'stack');
+    chips('g-mission', 'h-mission', SCEN.MISSION_ORDER.map(k => [k, SCEN.MISSIONS[k]]), CFG.mission, k => CFG.mission = k, 'mission');
+    chips('g-theme', null, Object.entries(HL.THEMES).map(([k, v]) => [k, { label: v.label }]), CFG.theme,
+      k => { CFG.theme = k; HL.applyTheme(k); });
+    chips('g-pace', 'h-pace', Object.entries(SCEN.PACES), CFG.pace, k => CFG.pace = k, 'pace');
+    chips('g-lang', null, Object.entries(I18N.LANGS), CFG.lang, k => CFG.lang = k);
+    chips('g-fleet', null, FLEET_SIZES.map(n => [n, { label: n + (CFG.lang === 'ko' ? '대' : ' agents') }]),
+      CFG.fleet, k => CFG.fleet = Number(k));
+
+    /* 토글 */
+    const t = $('g-opts'); t.textContent = '';
+    const oInfo = o => locMeta('opts', o.k, o);
+    for (const o of OPTS) {
+      const m = oInfo(o);
+      const b = mkel('button', 'tg' + (CFG.opts[o.k] ? ' on' : ''), '<span class="sw"></span>' + esc(m.label));
+      b.onclick = () => { CFG.opts[o.k] = !CFG.opts[o.k]; this.build(); };
+      b.onmouseenter = () => { $('h-opts').innerHTML = '<b>' + esc(m.label) + '</b> — ' + esc(m.hint); };
+      t.appendChild(b);
+    }
+    const d = oInfo(OPTS[1]);
+    $('h-opts').innerHTML = '<b>' + esc(d.label) + '</b> — ' + esc(d.hint);
+
+    /* 런처 고정 문구 */
+    applyChromeLang();
+    const tag = document.querySelector('.brand .tag');
+    const t1 = I18N.s(CFG.lang, 'tag.1');
+    if (t1) tag.innerHTML = esc(t1) + '<br>' + esc(I18N.s(CFG.lang, 'tag.2')) +
+      '<br><em>' + esc(I18N.s(CFG.lang, 'tag.3')) + '</em>';
+    else if (tag.dataset.en) tag.innerHTML = tag.dataset.en;
+    if (!tag.dataset.en) tag.dataset.en = tag.innerHTML;
+
+    const foot = document.querySelector('.foot');
+    const f1 = I18N.s(CFG.lang, 'foot.1');
+    if (!foot.dataset.en) foot.dataset.en = foot.innerHTML;
+    foot.innerHTML = f1
+      ? f1 + '<br>' + I18N.s(CFG.lang, 'foot.2') +
+        '<div class="warn">' + esc(I18N.s(CFG.lang, 'foot.3')) + '</div>'
+      : foot.dataset.en;
+  },
+
+  open() {
+    PAUSED = true;
+    $('launcher').classList.remove('hide');
+    this.build();
+  },
+  hide() { $('launcher').classList.add('hide'); },
+};
+
+/* ════════════════════════════════════════════════════════════════════════
+   시작 / 루프
+   ════════════════════════════════════════════════════════════════════════ */
+let IDE = null;
+
+function applyLayout() {
+  const app = $('app');
+  app.className = 'ns on l-' + CFG.layout;
+  const ide = CFG.layout === 'ide';
+  $('activity').style.display = ide ? 'flex' : 'none';
+  $('side').classList.toggle('hide', !ide);
+  $('chat').classList.toggle('hide', !ide);
+  $('lay-ide').style.display = ide ? 'flex' : 'none';
+  $('status').style.display = ide ? 'flex' : 'none';
+  paintActivity();
+  applyChromeLang();
+  UI.title();
+}
+
+/** data-t 가 붙은 정적 라벨을 현재 언어로 바꾼다. */
+function applyChromeLang() {
+  document.querySelectorAll('[data-t]').forEach(n => {
+    const v = I18N.s(CFG.lang, n.dataset.t);
+    if (v == null) { if (n.dataset.en) n.innerHTML = n.dataset.en; return; }
+    if (!n.dataset.en) n.dataset.en = n.innerHTML;
+    n.innerHTML = v;
+  });
+  const cb = $('c-home').querySelector('span:last-child'); if (cb) cb.textContent = T('ctl.home', 'Main');
+  $('c-pause').querySelector('span:last-child').textContent = PAUSED ? T('ctl.resume', 'Resume') : T('ctl.pause', 'Pause');
+  $('c-hyper').querySelector('span:last-child').textContent = T('ctl.hyper', 'Hyper');
+  $('c-layout').querySelector('span:last-child').textContent = T('ctl.layout', 'Layout');
+  $('c-full').querySelector('span:last-child').textContent = T('ctl.full', 'Fullscreen');
+}
+
+async function start() {
+  GEN++;
+  Ops.stop(); Fleet.stop(); Panic.on = false; SPEED = 1; PAUSED = false;
+  $('toasts').textContent = ''; $('pings').textContent = '';
+  const g = GEN;
+
+  CFG.user = ($('in-user').value || 'leaf').trim().replace(/\s+/g, '').slice(0, 14);
+  CFG.agent = ($('in-agent').value || pick(SCEN.AGENT_NAMES)).trim().replace(/\s+/g, '').slice(0, 14);
+  CFG.model = $('in-model').value;
+
+  HL.applyTheme(CFG.theme);
+  $('app').classList.add('on');
+  applyLayout();
+  Ed.init();
+  Launcher.hide();
+  STARTED = Date.now(); TOKENS = 0; MISSION_N = 0; EDITS = COMMITS = TESTS = 0;
+
+  showHint();
+  startClocks();
+
+  if (CFG.layout === 'agi') {
+    RUN = I18N.localize(SCEN.build(CFG.stack, CFG.mission, { bump: 0 }), CFG.lang);
+    UI.title();
+    Fleet.start();
+    return;
+  }
+
+  if (CFG.layout === 'swarm') {
+    RUN = I18N.localize(SCEN.build(CFG.stack, CFG.mission, { bump: 0 }), CFG.lang);
+    UI.title();
+    Swarm.build(RUN.stack, CFG.mission);
+    Swarm.panes.forEach((p, i) => Swarm.runPane(p, CFG.stack, i).catch(e => { if (e !== ABORT) console.error(e); }));
+    return;
+  }
+
+  /* IDE / agent / ops 는 하나의 디렉터를 무한히 돌린다 */
+  let sink;
+  if (CFG.layout === 'ide') { IDE = new IdeSink(); sink = IDE; }
+  else if (CFG.layout === 'agent') {
+    sink = new StreamSink(new Stream($('ag-out'), 420), {
+      header: l => { const n = $('ag-tab1'); if (n) n.textContent = CFG.agent + ' · ' + l.toLowerCase(); },
+    });
+  } else {
+    RUN = I18N.localize(SCEN.build(CFG.stack, CFG.mission, { bump: 0 }), CFG.lang);
+    Ops.start(RUN.stack);
+    sink = new StreamSink(new Stream($('ops-agent-out'), 60), { compact: true, keep: false });
+  }
+
+  const dir = new Director(sink);
+  let mid = CFG.mission, bump = 0;
+  while (g === GEN) {
+    RUN = I18N.localize(SCEN.build(CFG.stack, mid, { bump }), CFG.lang);
+    UI.title(); UI.status();
+    if (CFG.layout === 'agent') agentSide();
+    try { await dir.play(RUN); } catch (e) { if (e === ABORT) return; console.error(e); return; }
+    MISSION_N++;
+    if (!CFG.opts.loop) { UI.phase = 'Idle'; UI.status(); return; }
+    UI.toast('Agent', T('msg.next', 'Next ticket picked up automatically.'), 'info');
+    try { await wait(3200); } catch (e) { return; }
+    mid = SCEN.nextMission(mid); bump++;
+  }
+}
+
+/* 헤드리스 레이아웃 우측 정보판 */
+function agentSide() {
+  if (!RUN) return;
+  const s = RUN.stack;
+  $('ag-side').innerHTML =
+    '<div class="h">Session</div>' +
+    '<div class="k"><span>agent</span><b>' + esc(CFG.agent) + '</b></div>' +
+    '<div class="k"><span>model</span><b>' + esc(CFG.model) + '</b></div>' +
+    '<div class="k"><span>repo</span><b>' + esc(s.repo) + '</b></div>' +
+    '<div class="k"><span>branch</span><b>' + esc(RUN.branch.slice(0, 18)) + '</b></div>' +
+    '<div class="k"><span>ticket</span><b>' + esc(RUN.ticket.id) + '</b></div>' +
+    '<div class="sec"><div class="h">Context</div>' +
+    '<div class="k"><span>used</span><b id="ag-ctx">0%</b></div><div class="bar"><i id="ag-bar" style="width:0%"></i></div></div>' +
+    '<div class="sec"><div class="h">This session</div>' +
+    '<div class="k"><span>edits</span><b id="ag-ed">0</b></div>' +
+    '<div class="k"><span>commands</span><b id="ag-cm">0</b></div>' +
+    '<div class="k"><span>commits</span><b id="ag-co">0</b></div>' +
+    '<div class="k"><span>tickets</span><b id="ag-tk">0</b></div></div>' +
+    '<div class="sec"><div class="h">Mission</div><div class="tl"><div>' + esc(RUN.title) + '</div></div></div>';
+}
+
+/* 시계 · 카운터 */
+function startClocks() {
+  if (startClocks.iv) clearInterval(startClocks.iv);
+  startClocks.iv = setInterval(() => {
+    if (!RUN) return;
+    UI.status();
+    if (IDE && CFG.layout === 'ide') IDE.footer();
+    if (CFG.layout === 'agent') {
+      const pct = clamp(Math.round((TOKENS / 200000) * 100), 0, 99);
+      const set = (id, v) => { const n = $(id); if (n) n.textContent = v; };
+      set('ag-ctx', pct + '%'); set('ag-ed', EDITS); set('ag-cm', TESTS + COMMITS + EDITS);
+      set('ag-co', COMMITS); set('ag-tk', MISSION_N);
+      const b = $('ag-bar'); if (b) b.style.width = pct + '%';
+      $('ag-foot').innerHTML =
+        '<span>' + (PAUSED ? '⏸ paused' : '⏵ ' + esc(UI.phase || 'working')) + '</span>' +
+        '<span style="opacity:.8">' + esc(ktok()) + '</span>' +
+        '<span style="opacity:.8">' + esc(elapsed()) + '</span>' +
+        '<span style="opacity:.6">' + esc(CFG.model) + '</span>' +
+        '<span class="sp">' + hhmmss(new Date()) + '</span>';
+    }
+    if (CFG.layout === 'ops') {
+      const m = $('ops-agent-meta');
+      if (m) m.textContent = CFG.agent + ' · ' + (UI.phase || 'working').toLowerCase() + ' · ' + ktok();
+    }
+  }, 1000);
+}
+
+/* 잡담 알림 — 화면과 무관하게 이따금 */
+setInterval(() => {
+  if (!RUN || PAUSED || !CFG.opts.pings) return;
+  if (Math.random() < 0.13) { const c = pick(SCEN.CHATTER); UI.ping(c.who, c.ch, c.text); }
+}, 21000);
+
+function showHint() {
+  const h = $('hint');
+  h.innerHTML = T('hint',
+    '<kbd>Esc</kbd> settings &nbsp;·&nbsp; <kbd>Space</kbd> pause &nbsp;·&nbsp; <kbd>L</kbd> layout &nbsp;·&nbsp; <kbd>`</kbd> focus &nbsp;·&nbsp; <kbd>F</kbd> fullscreen');
+  h.classList.remove('off');
+  setTimeout(() => h.classList.add('off'), 6500);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   조작 바
+   ────────────────────────────────────────────────────────────────────────
+   화면 위에 게임 UI 를 남기지 않는 것이 이 게임의 전부다. 그래서 조작
+   버튼은 마우스를 움직일 때만 나타나고, 손을 떼면 사라진다. 바 위에
+   커서가 있는 동안에는 사라지지 않으므로 누르려다 놓치는 일은 없다.
+   ════════════════════════════════════════════════════════════════════════ */
+const Ctl = {
+  t: null, over: false,
+  init() {
+    const bar = $('ctl');
+    bar.addEventListener('pointerenter', () => { this.over = true; clearTimeout(this.t); });
+    bar.addEventListener('pointerleave', () => { this.over = false; this.arm(); });
+
+    $('c-home').onclick = () => Launcher.open();
+    $('c-pause').onclick = () => { PAUSED = !PAUSED; this.sync(); if (IDE) IDE.footer(); };
+    $('c-hyper').onclick = () => {
+      CFG.pace = CFG.pace === 'hyper' ? 'agentp' : 'hyper';
+      if (IDE) { IDE.cps = SCEN.PACES[CFG.pace].cps; IDE.gap = SCEN.PACES[CFG.pace].gap; }
+      this.sync();
+      UI.toast('Agent', T('msg.pace', 'Pace') + ': ' + paceLabel(CFG.pace), 'info');
+    };
+    $('c-layout').onclick = () => cycleLayout();
+    $('c-full').onclick = () => toggleFull();
+
+    /* 타이틀바 신호등 — macOS 창 버튼이 하는 일을 그대로 한다. */
+    const lights = $('lights').children;
+    lights[0].title = T('ctl.home', 'Main');
+    lights[1].title = T('ctl.pause', 'Pause');
+    lights[2].title = T('ctl.full', 'Fullscreen');
+    $('lights').style.cursor = 'pointer';
+    lights[0].onclick = () => Launcher.open();
+    lights[1].onclick = () => { PAUSED = !PAUSED; this.sync(); };
+    lights[2].onclick = () => toggleFull();
+
+    window.addEventListener('pointermove', () => this.show());
+    window.addEventListener('pointerdown', () => this.show());
+  },
+  show() {
+    if ($('launcher').classList.contains('hide') === false) return;
+    $('ctl').classList.add('on');
+    this.sync();
+    this.arm();
+  },
+  arm() {
+    clearTimeout(this.t);
+    this.t = setTimeout(() => { if (!this.over) $('ctl').classList.remove('on'); }, 2600);
+  },
+  sync() {
+    const p = $('c-pause');
+    p.querySelector('.g').textContent = PAUSED ? '⏵' : '⏸';
+    p.querySelector('span:last-child').textContent = PAUSED ? T('ctl.resume', 'Resume') : T('ctl.pause', 'Pause');
+    p.classList.toggle('act', PAUSED);
+    $('c-hyper').classList.toggle('act', CFG.pace === 'hyper');
+    $('c-full').classList.toggle('act', !!document.fullscreenElement);
+  },
+};
+
+function cycleLayout() {
+  const ks = Object.keys(SCEN.LAYOUTS);
+  CFG.layout = ks[(ks.indexOf(CFG.layout) + 1) % ks.length];
+  start();
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   입력 — 전부 진짜 VS Code 단축키를 쓴다. 눌러도 부자연스럽지 않도록.
+   ════════════════════════════════════════════════════════════════════════ */
+function keys(e) {
+  const meta = e.metaKey || e.ctrlKey;
+  const live = $('app').classList.contains('on') && $('launcher').classList.contains('hide');
+
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    if (!live) { if (RUN) { PAUSED = false; Launcher.hide(); } return; }
+    Launcher.open(); return;
+  }
+  if (!live) {
+    if (e.key === 'Enter' && document.activeElement.tagName !== 'SELECT') { e.preventDefault(); start(); }
+    return;
+  }
+
+  if (meta && (e.key === 'b' || e.key === 'B')) { e.preventDefault(); $('side').classList.toggle('hide'); return; }
+  if (meta && (e.key === 'j' || e.key === 'J')) { e.preventDefault(); $('panel').classList.toggle('hide'); return; }
+  if (meta && e.shiftKey && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); UI.palette(); return; }
+  if (meta && (e.key === '`')) { e.preventDefault(); $('panel').classList.toggle('max'); return; }
+
+  switch (e.key) {
+    case ' ': e.preventDefault(); PAUSED = !PAUSED; if (IDE) IDE.footer(); break;
+    case '`': e.preventDefault(); Panic.toggle(); break;
+    case '1': case '2': case '3': case '4': case '5': {
+      const k = ['human', 'caff', 'agentp', 'turbo', 'hyper'][Number(e.key) - 1];
+      CFG.pace = k;
+      if (IDE) { IDE.cps = SCEN.PACES[k].cps; IDE.gap = SCEN.PACES[k].gap; }
+      Ctl.sync();
+      UI.toast('Agent', T('msg.pace', 'Pace') + ': ' + paceLabel(k), 'info');
+      break;
+    }
+    case 'l': case 'L': cycleLayout(); break;
+    case 'f': case 'F': case 'F11': e.preventDefault(); toggleFull(); break;
+    default: break;
+  }
+  if (e.key === 'p' && !meta) { UI.panelTab('problems'); setTimeout(() => UI.panelTab('term'), 2400); }
+}
+
+function toggleFull() {
+  const d = document;
+  if (!d.fullscreenElement) (d.documentElement.requestFullscreen || d.documentElement.webkitRequestFullscreen || (() => { })).call(d.documentElement);
+  else (d.exitFullscreen || d.webkitExitFullscreen || (() => { })).call(d);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   부팅
+   ════════════════════════════════════════════════════════════════════════ */
+(function boot() {
+  if (typeof SCEN === 'undefined' || typeof HL === 'undefined') {
+    document.body.innerHTML = '<div style="padding:40px;font:14px/1.8 system-ui;color:#cdd8e4;background:#0b0d11;height:100%">' +
+      '<b>Could not load syntax.js / scenarios.js.</b><br>They must sit next to index.html.<br>' +
+      'Some browsers block sub-scripts over file:// — try <code>python3 serve.py</code>.</div>';
+    return;
+  }
+  HL.applyTheme(CFG.theme);
+  paintActivity();
+  Ctl.init();
+  Launcher.build();
+
+  $('b-start').onclick = () => start();
+  $('b-rand').onclick = () => {
+    const ks = o => Object.keys(o);
+    CFG.layout = pick(ks(SCEN.LAYOUTS));
+    CFG.stack = pick(ks(SCEN.STACKS));
+    CFG.mission = pick(SCEN.MISSION_ORDER);
+    CFG.theme = pick(ks(HL.THEMES));
+    CFG.pace = pick(ks(SCEN.PACES));
+    CFG.fleet = pick([9, 24, 48, 100]);
+    $('in-agent').value = pick(SCEN.AGENT_NAMES);
+    HL.applyTheme(CFG.theme);
+    Launcher.build();
+  };
+  $('b-dice').onclick = () => { $('in-agent').value = pick(SCEN.AGENT_NAMES); };
+  $('in-model').onchange = () => { CFG.model = $('in-model').value; };
+  window.addEventListener('keydown', keys);
+  window.addEventListener('resize', () => { Ed.init(); Ed.paint(); });
+  document.addEventListener('click', () => Sound.ensure(), { once: true });
+
+  /* URL 파라미터로 바로 시작 — 사무실 모니터에 띄워 두는 용도
+     ?auto=1&layout=agent&stack=go&mission=incident&theme=monokai&pace=turbo&user=leaf */
+  const q = new URLSearchParams(location.search);
+  const take = (p, o, k) => { const v = q.get(p); if (v && o[v] !== undefined) CFG[k || p] = v; };
+  take('layout', SCEN.LAYOUTS); take('stack', SCEN.STACKS); take('theme', HL.THEMES); take('pace', SCEN.PACES);
+  take('lang', I18N.LANGS);
+  if (q.get('fleet')) CFG.fleet = clamp(parseInt(q.get('fleet'), 10) || 9, 1, 100);
+  if (q.get('mission') && SCEN.MISSIONS[q.get('mission')]) CFG.mission = q.get('mission');
+  if (q.get('user')) $('in-user').value = q.get('user');
+  if (q.get('agent')) $('in-agent').value = q.get('agent');
+  if (q.get('model') && SCEN.MODELS.includes(q.get('model'))) CFG.model = q.get('model');
+  for (const o of OPTS) if (q.get(o.k) !== null) CFG.opts[o.k] = q.get(o.k) !== '0';
+  HL.applyTheme(CFG.theme);
+  Launcher.build();
+  if (q.get('auto') === '1') setTimeout(start, 240);
+})();
+</script>
+</body>
+</html>
