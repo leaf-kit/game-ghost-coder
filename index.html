@@ -2506,7 +2506,7 @@ const WhiteHat = {
 
   emitLogs() {
     const p = this.curPhase; if (!p) return;
-    const inten = { baseline: 1, recon: 3, stuffing: 4, perimeter: 2, exfil: 5, contain: 3 }[p.key] || 2;
+    const inten = { baseline: 1, recon: 3, sqli: 2, stuffing: 4, perimeter: 2, webshell: 1, ssrf: 2, exfil: 5, contain: 3 }[p.key] || 2;
     const rows = p.gen(ri(1, inten));
     if (p.key !== 'baseline' && Math.random() < 0.5) rows.push(...WH.PHASES[0].gen(1));
     for (const e of rows) {
@@ -2515,13 +2515,14 @@ const WhiteHat = {
       if (e.code === 403 || p.key === 'contain') this.blocked++;
     }
     const rm = {
-      baseline: [40, 120], recon: [600, 1400], stuffing: [1800, 4200],
-      perimeter: [500, 1100], exfil: [900, 2100], contain: [200, 600],
+      baseline: [40, 120], recon: [600, 1400], sqli: [300, 820], stuffing: [1800, 4200],
+      perimeter: [500, 1100], webshell: [60, 190], ssrf: [120, 380], exfil: [900, 2100], contain: [200, 600],
     }[p.key] || [100, 300];
     this.tReq.textContent = ri(rm[0], rm[1]).toLocaleString();
     this.tBlk.textContent = this.blocked.toLocaleString();
     const reqTile = this.tReq.parentElement;
-    reqTile.classList.toggle('bad', p.key === 'stuffing' || p.key === 'exfil');
+    const BAD = { stuffing: 1, exfil: 1, sqli: 1, webshell: 1, ssrf: 1 };
+    reqTile.classList.toggle('bad', !!BAD[p.key]);
     reqTile.classList.toggle('warn', p.key === 'recon' || p.key === 'perimeter');
   },
 
@@ -2756,6 +2757,7 @@ async function start() {
 
   showHint();
   startClocks();
+  Ctl.reveal();          // 화면 전환 직후 조작 바를 잠깐 보여 준 뒤 거둔다
 
   if (CFG.layout === 'agi') {
     RUN = I18N.localize(SCEN.build(CFG.stack, CFG.mission, { bump: 0 }), CFG.lang);
@@ -2904,8 +2906,19 @@ const Ctl = {
     lights[1].onclick = () => { PAUSED = !PAUSED; this.sync(); };
     lights[2].onclick = () => toggleFull();
 
-    window.addEventListener('pointermove', () => this.show());
-    window.addEventListener('pointerdown', () => this.show());
+    /* 예전엔 아무 데서나 마우스를 움직여도 바가 떴다. 이제는 바 근처로
+       커서가 왔을 때만 다시 나타난다. 화면 전환 직후 잠깐 보여 주는 것은
+       reveal() 가 따로 맡는다. */
+    window.addEventListener('pointermove', e => { if (this.near(e)) this.show(); });
+  },
+  /** 포인터가 바(하단 중앙) 근처에 있는가 — 숨겨져 있어도 레이아웃은 있으므로
+      getBoundingClientRect 로 거리를 잰다. 세로로 넉넉한 핫존을 둔다. */
+  near(e) {
+    const r = $('ctl').getBoundingClientRect();
+    if (!r.width) return false;
+    const mx = 90, my = 120;   // 좌우 90px·위아래로 넉넉히
+    return e.clientX >= r.left - mx && e.clientX <= r.right + mx &&
+           e.clientY >= r.top - my && e.clientY <= r.bottom + 30;
   },
   show() {
     if ($('launcher').classList.contains('hide') === false) return;
@@ -2913,9 +2926,16 @@ const Ctl = {
     this.sync();
     this.arm();
   },
+  /** 화면 전환 직후 2.8초 잠깐 띄웠다가 자동으로 거둔다. */
+  reveal() {
+    if ($('launcher').classList.contains('hide') === false) return;
+    $('ctl').classList.add('on');
+    this.sync();
+    this.arm();
+  },
   arm() {
     clearTimeout(this.t);
-    this.t = setTimeout(() => { if (!this.over) $('ctl').classList.remove('on'); }, 2600);
+    this.t = setTimeout(() => { if (!this.over) $('ctl').classList.remove('on'); }, 2800);
   },
   sync() {
     const p = $('c-pause');

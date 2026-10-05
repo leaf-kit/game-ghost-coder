@@ -42,13 +42,31 @@ const UA = {
 };
 
 const rip = a => a[Math.floor(Math.random() * a.length)];
-const uip = () => rip(USER_IPS) + (Math.floor(Math.random() * 254) + 1) + '.' + (Math.floor(Math.random() * 254) + 1);
+const ri = (a, b) => a + Math.floor(Math.random() * (b - a + 1));
+const rnd = (a, b) => a + Math.random() * (b - a);
+const uip = () => rip(USER_IPS) + ri(1, 254) + '.' + ri(1, 254);
 const pad = (n, w) => String(n).padStart(w, '0');
 
-/* 공용 로그 포맷 — nginx combined 에 가깝게. ts 는 디렉터가 채운다. */
-function log(ip, method, path, code, ua, bytes) {
+/* Referer 풀 — 평시 트래픽은 앱 내부에서 넘어오고, 자동화 공격은 대개 비어
+   있다("-"). 이 대비 자체가 탐지 신호가 된다. */
+const REFERERS = [
+  'https://m.shinhan.com/m/main', 'https://m.shinhan.com/m/loan/intro',
+  'https://m.shinhan.com/m/mypage', 'android-app://com.shinhan.sbanking', '-', '-',
+];
+
+/* 공용 로그 포맷 — nginx combined 에 가깝게. ts 는 디렉터가 채운다.
+   ref(리퍼러)·rt(응답시간)까지 담아 실제 WAS/프록시 로그처럼 보이게 한다. */
+function log(ip, method, path, code, ua, bytes, ref) {
+  const b = bytes != null ? bytes
+    : code >= 500 ? ri(0, 340)
+    : code === 200 ? ri(1200, 9800)
+    : ri(180, 640);
+  const rt = code >= 500 ? rnd(0.002, 0.03)
+    : code === 200 ? rnd(0.04, 0.92)
+    : rnd(0.002, 0.06);
   return {
-    ip, method, path, code, ua: UA[ua] || ua, bytes: bytes != null ? bytes : (code === 200 ? 1200 + Math.floor(Math.random() * 9000) : 480 + Math.floor(Math.random() * 300)),
+    ip, method, path, code, ua: UA[ua] || ua, bytes: b,
+    ref: ref != null ? ref : '-', rt,
     bad: code >= 400 || /ARTEX|artex/.test(UA[ua] || ua || '') || method === 'ATTACK',
   };
 }
@@ -67,10 +85,11 @@ const PHASES = [
   mins: 0,
   gen(n) {
     const out = [];
-    const paths = ['/m/main', '/m/loan/intro', '/m/auth/login', '/api/v2/products', '/m/mypage', '/health'];
+    const paths = ['/m/main', '/m/loan/intro', '/m/auth/login', '/api/v2/products', '/m/mypage', '/health', '/m/card/benefits', '/api/v2/fx/rate'];
     for (let i = 0; i < n; i++) {
       const p = rip(paths);
-      out.push(log(uip(), 'GET', p, 200, 'real'));
+      const code = Math.random() < 0.012 ? 401 : 200;   // 평시에도 로그인 실패는 조금 있다
+      out.push(log(uip(), Math.random() < 0.2 ? 'POST' : 'GET', p, code, 'real', null, rip(REFERERS)));
     }
     return out;
   },
@@ -123,6 +142,52 @@ const PHASES = [
       title: { ko: '즉시 조치', en: 'Immediate actions' },
       body: { ko: '1) WAF에 경로 열거 레이트리밋(IP·ASN 단위).  2) actuator/swagger/.git 등 운영 노출 차단.  3) 서버 배너·스택트레이스 숨김.  4) 알려진 스캐너 UA·행위 기반 차단 룰 배포.',
               en: '1) WAF rate-limit on path enumeration (per IP/ASN).  2) Block actuator/swagger/.git exposure in prod.  3) Hide server banners & stack traces.  4) Deploy scanner UA + behaviour-based block rules.' },
+    },
+  ],
+},
+
+/* ── 1b. SQL 인젝션 — 조회 파라미터 ──────────────────────────────────── */
+{
+  key: 'sqli',
+  title: { ko: 'SQL 인젝션', en: 'SQL injection' },
+  mins: 7,
+  gen(n) {
+    const payloads = [
+      "/broker/loan/search?q=1' OR '1'='1",
+      "/broker/loan/search?q=1' UNION SELECT id,passwd,rrn FROM member-- -",
+      "/broker/loan/search?q=1'; WAITFOR DELAY '0:0:5'--",
+      "/broker/loan/search?q=1' AND 1=CONVERT(int,@@version)--",
+      "/broker/loan/search?q=1' AND SUBSTRING((SELECT TOP 1 passwd FROM member),1,1)>'m'--",
+      "/broker/loan/search?q=%27%20OR%20SLEEP(5)%23",
+    ];
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const r = Math.random();
+      const code = r < 0.28 ? 500 : r < 0.46 ? 403 : 200;   // 에러 기반 누출 / WAF 차단 / 블라인드 참
+      out.push(log(rip(ATTACK_IPS), 'GET', rip(payloads), code, 'artex', code === 500 ? ri(900, 2400) : undefined));
+    }
+    return out;
+  },
+  findings: [
+    { kind: 'detect', sev: 'high', tag: 'T1190 · Exploit Public App',
+      title: { ko: 'SQL 인젝션 시도 탐지', en: 'SQL-injection attempts detected' },
+      body: { ko: '대출 검색 파라미터 q 에 작은따옴표, UNION SELECT, WAITFOR DELAY, CONVERT 같은 SQL 조각이 들어옵니다. 일부 요청이 500(DB 에러)으로 떨어지고, 응답 본문에 SQL 예외 메시지가 그대로 노출됐습니다 — 쿼리에 입력이 그대로 꽂히고 있다는 신호입니다.',
+              en: 'The loan-search param q is receiving SQL fragments — single quotes, UNION SELECT, WAITFOR DELAY, CONVERT. Some requests return 500 (DB error) and the response body leaks the raw SQL exception: a clear sign input is being concatenated straight into the query.' },
+    },
+    { kind: 'diag', sev: 'crit', tag: 'A03:2021 · Injection',
+      title: { ko: '에러 기반 + 시간 기반 블라인드 주입', en: 'Error- & time-based blind injection' },
+      body: { ko: 'CONVERT(int,@@version)로 DB 버전이 에러에 실려 나오고(에러 기반), SLEEP(5)/WAITFOR 요청은 정확히 5초 뒤 응답합니다(시간 기반 블라인드). UNION 으로 member 테이블의 passwd·주민번호 컬럼까지 끌어낼 수 있는 상태. WAF가 일부만 막아 403과 200이 섞여 있습니다.',
+              en: 'CONVERT(int,@@version) spills the DB version in the error (error-based), and SLEEP(5)/WAITFOR requests respond exactly 5s later (time-based blind). UNION can pull the member table’s passwd and national-ID columns. The WAF only catches some — 403s and 200s are mixed.' },
+    },
+    { kind: 'teach', sev: 'info', tag: { ko: '왜 위험한가', en: 'why it matters' },
+      title: { ko: '교육 · 문자열을 붙이면 지는 게임', en: 'Lesson · string-building is a losing game' },
+      body: { ko: '근본 원인은 "코드(SQL)와 데이터(입력)를 섞은 것"입니다. 입력을 아무리 필터링해도 인코딩·우회가 끝없이 나옵니다. 정답은 필터가 아니라 분리 — 파라미터 바인딩(프리페어드 스테이트먼트)으로 입력이 절대 쿼리 구조가 되지 못하게 합니다. WAF는 시간을 버는 반창고일 뿐 치료가 아닙니다.',
+              en: 'The root cause is mixing code (SQL) with data (input). However much you filter, there’s always another encoding or bypass. The fix isn’t filtering — it’s separation: parameter binding (prepared statements) so input can never become query structure. A WAF buys time; it is a bandage, not a cure.' },
+    },
+    { kind: 'fix', sev: 'info', tag: { ko: '대응', en: 'actions' },
+      title: { ko: '즉시 조치', en: 'Immediate actions' },
+      body: { ko: '1) 해당 쿼리를 파라미터 바인딩/ORM 로 전환 — 문자열 연결 제거.  2) DB 계정 최소권한(읽기 전용·테이블 제한).  3) 운영에서 상세 SQL 에러 숨김(일반 오류 페이지).  4) WAF 가상 패치로 즉시 틀어막고, 코드 수정 배포까지 모니터링.',
+              en: '1) Switch the query to parameter binding/ORM — no string concatenation.  2) Least-privilege DB account (read-only, table-scoped).  3) Hide detailed SQL errors in prod (generic error page).  4) WAF virtual-patch as an immediate stopgap; monitor until the code fix ships.' },
     },
   ],
 },
@@ -205,6 +270,92 @@ const PHASES = [
       title: { ko: '즉시 조치', en: 'Immediate actions' },
       body: { ko: '1) 인터넷 노출 자산 전수 조사(ASM) — 모르는 호스트부터 차단.  2) 외곽 시스템도 핵심망과 동일한 인증·WAF·로깅 적용.  3) 토큰 발급 경로 점검(서명 검증·만료·audience).  4) 망분리/접근통제 예외 재검토.',
               en: '1) Full internet-exposure inventory (ASM) — block unknown hosts first.  2) Apply the same auth/WAF/logging to edge systems as to the core.  3) Audit token-issuance (signature, expiry, audience).  4) Re-review segmentation / access-control exceptions.' },
+    },
+  ],
+},
+
+/* ── 3b. 웹셸 업로드 — 원격 코드 실행 ────────────────────────────────── */
+{
+  key: 'webshell',
+  title: { ko: '웹셸 업로드 · RCE', en: 'Web-shell upload · RCE' },
+  mins: 23,
+  gen(n) {
+    const out = [];
+    if (!this._sh) this._sh = 'wd_' + ri(1000, 9999) + '.jsp';
+    const sh = this._sh;
+    const cmds = ['whoami', 'id', 'cat%20/etc/passwd', 'ls%20-al%20/app/config', 'cat%20/app/config/db.yml', 'uname%20-a'];
+    for (let i = 0; i < n; i++) {
+      const r = Math.random();
+      if (r < 0.2) out.push(log(rip(ATTACK_IPS), 'POST', '/legacy/loan/admin/upload', 200, 'artex', ri(300, 900)));
+      else out.push(log(rip(ATTACK_IPS), 'GET', '/upload/2026/' + sh + '?cmd=' + rip(cmds), 200, 'artex', ri(200, 2600)));
+    }
+    return out;
+  },
+  findings: [
+    { kind: 'detect', sev: 'crit', tag: 'T1505.003 · Web Shell',
+      title: { ko: '업로드 폴더에 실행 파일이 생겼다', en: 'An executable appeared in the upload folder' },
+      body: { ko: '/legacy/loan/admin/upload 로 POST 가 들어온 직후, 어제까지 없던 /upload/2026/wd_####.jsp 에 GET 요청이 쏟아집니다. 쿼리스트링이 ?cmd=whoami, ?cmd=cat /etc/passwd — 업로드한 파일이 명령을 받아 실행하고 있습니다. 웹셸입니다.',
+              en: 'Right after a POST to /legacy/loan/admin/upload, GETs pour into /upload/2026/wd_####.jsp — a file that didn’t exist yesterday. Its query string is ?cmd=whoami, ?cmd=cat /etc/passwd. The uploaded file is taking commands and running them. It’s a web shell.' },
+    },
+    { kind: 'diag', sev: 'crit', tag: 'A03/A01 · Unrestricted Upload',
+      title: { ko: '업로드 제한이 없어 서버를 잡혔다', en: 'Unrestricted upload = server takeover' },
+      body: { ko: '업로드가 확장자/타입 화이트리스트 없이 .jsp 를 받아, 웹 루트 아래 실행 가능한 위치에 저장했습니다. 그 결과 공격자가 서버에서 임의 명령을 실행(RCE)합니다 — DB 접속정보(db.yml)까지 읽혔습니다. 외곽 시스템 한 대가 완전히 장악된 상태로 봐야 합니다.',
+              en: 'The upload accepted a .jsp with no extension/type allow-list and stored it in an executable path under the web root. The attacker now runs arbitrary commands on the server (RCE) — even the DB credentials (db.yml) were read. Treat that edge host as fully compromised.' },
+    },
+    { kind: 'teach', sev: 'info', tag: { ko: '왜 위험한가', en: 'why it matters' },
+      title: { ko: '교육 · 업로드는 "코드 배포"다', en: 'Lesson · an upload is a code deploy' },
+      body: { ko: '파일 업로드를 허용한다는 건, 잘못하면 공격자에게 "코드 배포 권한"을 주는 것과 같습니다. 세 가지가 동시에 틀어져야 막힙니다: (1) 무엇을 받을지(허용 목록), (2) 어디에 둘지(웹 루트 밖·실행 금지), (3) 어떻게 부를지(원본 경로 비공개). 하나라도 뚫리면 저장소가 곧 실행기가 됩니다.',
+              en: 'Allowing uploads can hand an attacker a code-deploy pipeline. Three things must all hold: (1) what you accept (allow-list), (2) where it lands (off web-root, non-executable), (3) how it’s served (never the raw path). Break any one and your storage becomes an interpreter.' },
+    },
+    { kind: 'fix', sev: 'info', tag: { ko: '대응', en: 'actions' },
+      title: { ko: '즉시 조치', en: 'Immediate actions' },
+      body: { ko: '1) 업로드 디렉터리 스크립트 실행 비활성화(핸들러 해제).  2) 확장자+MIME+매직바이트 화이트리스트, 파일명 난수화.  3) 업로드물은 웹 루트 밖·별도 도메인에 저장.  4) IR: 심어진 웹셸 전수 탐색·제거, 노출된 자격증명 전부 교체, 해당 호스트는 RCE 전제로 재구축.',
+              en: '1) Disable script execution in upload dirs (unmap handlers).  2) Allow-list extension + MIME + magic bytes; randomize names.  3) Store uploads off web-root, on a separate domain.  4) IR: hunt & remove every planted shell, rotate all exposed credentials, rebuild the host assuming RCE.' },
+    },
+  ],
+},
+
+/* ── 3c. SSRF — 클라우드 메타데이터 자격증명 탈취 ────────────────────── */
+{
+  key: 'ssrf',
+  title: { ko: 'SSRF · 클라우드 자격증명 탈취', en: 'SSRF · cloud-credential theft' },
+  mins: 25,
+  gen(n) {
+    const targets = [
+      'http://169.254.169.254/latest/meta-data/iam/security-credentials/',
+      'http://169.254.169.254/latest/meta-data/iam/security-credentials/prod-app-role',
+      'http://169.254.169.254/latest/api/token',
+      'http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token',
+      'http://127.0.0.1:8500/v1/kv/prod/db?recurse',
+      'http://10.0.3.17:6379/',
+    ];
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const t = rip(targets);
+      out.push(log(rip(ATTACK_IPS), 'GET', '/api/v2/preview?url=' + encodeURIComponent(t), 200, 'artex', ri(600, 3200)));
+    }
+    return out;
+  },
+  findings: [
+    { kind: 'detect', sev: 'crit', tag: 'A10:2021 · SSRF',
+      title: { ko: '서버가 내부 주소를 대신 호출한다', en: 'The server is fetching internal URLs' },
+      body: { ko: '이미지 미리보기 API /api/v2/preview?url= 에 외부가 아닌 내부 주소가 들어옵니다 — 169.254.169.254(클라우드 메타데이터), 127.0.0.1:8500(Consul KV), 10.0.3.17:6379(Redis). 서버가 사용자가 준 URL 을 그대로 대신 요청하는 SSRF 입니다.',
+              en: 'The image-preview API /api/v2/preview?url= is being fed internal addresses, not external ones — 169.254.169.254 (cloud metadata), 127.0.0.1:8500 (Consul KV), 10.0.3.17:6379 (Redis). The server fetches the user-supplied URL on their behalf: SSRF.' },
+    },
+    { kind: 'diag', sev: 'crit', tag: { ko: 'T1552.005 · 클라우드 자격증명', en: 'T1552.005 · cloud creds' },
+      title: { ko: 'IAM 임시 자격증명이 새 나간다', en: 'IAM temp credentials are leaking' },
+      body: { ko: '메타데이터 엔드포인트(/iam/security-credentials/)가 200 으로 응답하면, 그 서버에 부여된 클라우드 역할의 임시 키(AccessKey·SecretKey·Token)가 그대로 넘어갑니다. 공격자는 그 키로 서버인 척 클라우드 API 를 호출 — 내부망 깊숙이 들어가는 발판입니다. IMDSv1(토큰 없는 메타데이터)이 켜져 있다는 뜻이기도 합니다.',
+              en: 'When the metadata endpoint (/iam/security-credentials/) answers 200, the temporary keys of the cloud role attached to that server (AccessKey, SecretKey, Token) walk right out. The attacker calls the cloud API as the server — a pivot deep into the internal network. It also means IMDSv1 (token-less metadata) is enabled.' },
+    },
+    { kind: 'teach', sev: 'info', tag: { ko: '왜 위험한가', en: 'why it matters' },
+      title: { ko: '교육 · 위험한 건 "서버의 위치"다', en: 'Lesson · the danger is the server’s position' },
+      body: { ko: 'SSRF 가 무서운 이유는 데이터가 아니라 신뢰 때문입니다. 서버는 방화벽 안쪽에 있고 메타데이터·내부 서비스가 그 서버를 믿습니다. 사용자가 준 URL 을 서버가 대신 열어 주는 순간, 공격자는 그 신뢰를 빌려 씁니다. 그래서 "URL 을 받는 기능"은 전부 잠재적 내부 통로입니다.',
+              en: 'SSRF is dangerous not for the data but for the trust. The server sits inside the firewall, and metadata and internal services trust it. The moment the server opens a user-supplied URL on their behalf, the attacker borrows that trust. Any feature that "takes a URL" is a potential internal tunnel.' },
+    },
+    { kind: 'fix', sev: 'info', tag: { ko: '대응', en: 'actions' },
+      title: { ko: '즉시 조치', en: 'Immediate actions' },
+      body: { ko: '1) IMDSv2 강제(세션 토큰·홉 제한 1) — 메타데이터 토큰 없는 접근 차단.  2) 앱의 아웃바운드를 허용 목록으로 제한, 링크로컬(169.254)·사설(RFC1918) 대역 차단.  3) 사용자 URL 은 스킴·호스트 검증 후 재해석(DNS rebinding 방지).  4) 유출됐을 IAM 역할 키 즉시 회수·재발급.',
+              en: '1) Enforce IMDSv2 (session token, hop-limit 1) — block token-less metadata access.  2) Restrict the app’s outbound to an allow-list; block link-local (169.254) and private (RFC1918) ranges.  3) Validate scheme/host of user URLs and re-resolve (prevent DNS rebinding).  4) Immediately revoke & reissue any IAM role keys that may have leaked.' },
     },
   ],
 },
@@ -332,9 +483,12 @@ function fmtLog(e, ts) {
   const codeCol = e.code >= 500 ? 'r' : e.code >= 400 ? (e.code === 403 ? 'g' : 'y') : 'g';
   const uaBad = /ARTEX/.test(e.ua);
   const ua = uaBad ? '{{m|"' + e.ua + '"}}' : '{{d|"' + e.ua + '"}}';
+  const mCol = e.method === 'POST' || e.method === 'PUT' ? 'y'
+    : e.method === 'DELETE' ? 'r' : 'b';
   return '{{gr|' + e.ip + '}} {{d|- -}} {{d|[' + ts + ']}} "' +
-    (e.method === 'POST' ? '{{y|POST}}' : '{{b|' + e.method + '}}') + ' ' + e.path + ' HTTP/2" ' +
-    '{{' + codeCol + '|' + e.code + '}} ' + e.bytes + ' ' + ua;
+    '{{' + mCol + '|' + e.method + '}} ' + e.path + ' HTTP/2" ' +
+    '{{' + codeCol + '|' + e.code + '}} ' + e.bytes +
+    ' {{d|"' + e.ref + '"}} ' + ua + ' {{d|rt=' + e.rt.toFixed(3) + '}}';
 }
 
 return { PHASES, SEV, KIND, UI, ATTACK_IPS, fmtLog };
