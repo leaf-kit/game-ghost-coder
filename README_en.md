@@ -49,14 +49,32 @@ throughput counters (agents online, tickets/hour, PRs merged, lines changed, tes
 tokens/sec, green-build rate, human reviews) and a merge-queue firehose. Throughput no
 team could produce, which is the message.
 
-**White-Hat Mode** — a separate defensive scene. A reconstruction of the 2026
-financial-sector AI breach (credential stuffing, peripheral-system auth bypass, mass
+**⛊ White-Hat — Incident Response** — a separate defensive scene. A reconstruction of the
+2026 financial-sector AI breach (credential stuffing, peripheral-system auth bypass, mass
 loan-lookup API enumeration, traces of the `ARTEX` autonomous pentest tool). On the left,
-access logs stream in exactly as they would have landed on the real servers; on the right,
-a blue-team agent detects each stage, says **what is wrong**, explains why it is dangerous,
-and shows how to stop it (with OWASP/MITRE mapping). The top bar shows a SOC analyst
-responding — the worker on the job. It teaches defense, not attack, and every log line is
-synthetic.
+access logs stream in exactly as they would have landed on the real servers — complete with
+referer, response-time (`rt`), method and status fields, like a real WAS/proxy log. On the
+right, a **blue-team agent** unpacks **what is wrong** at each stage through four kinds of
+card: **DETECT → DIAGNOSE → LEARN → FIX**, each tagged with a severity and an OWASP /
+MITRE ATT&CK mapping. The top bar shows a SOC analyst responding — the worker on the job.
+
+The incident unfolds as a **nine-stage timeline**; the log pattern and the agent's analysis
+shift with each attack.
+
+| Stage | Attack situation | Mapping |
+|---|---|---|
+| Baseline | Establish the normal traffic baseline | — |
+| Recon | `ARTEX` autonomous scanner enumerating paths | T1595 |
+| **SQL injection** | `UNION`/`WAITFOR`/`CONVERT` injected into the loan-search param | A03:2021 · T1190 |
+| Credential stuffing | Breached ID/PW replayed from distributed IPs, some succeed | A07:2021 · T1110.004 |
+| Perimeter bypass | Auth bypass into broker/employee portals outside the WAF | A01/A05:2021 |
+| **Web-shell upload · RCE** | Unrestricted upload → `cmd=` remote command execution | T1505.003 |
+| **SSRF · credential theft** | `169.254.169.254` metadata → cloud IAM key theft | A10:2021 · T1552.005 |
+| Mass enumeration | Sequential-ID sweep of personal data (IDOR/BOLA) | API1:2023 |
+| Containment | WAF rules deployed, sessions expired, lessons learned | — |
+
+It teaches defense, not attack; every log line is synthetic and all IPs are documentation
+ranges (RFC 5737). Both Korean and English are supported.
 
 ---
 
