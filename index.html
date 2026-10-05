@@ -497,6 +497,86 @@ input{font:inherit}
 }
 #agi-ev .l{min-height:15px;flex:none;overflow:hidden;text-overflow:ellipsis}
 
+/* ═══════════════ 레이아웃: 화이트해커 모드 ═══════════════
+   공격 화면이 아니라 방어 화면이다. 왼쪽엔 침입 로그가 흐르고, 오른쪽엔
+   블루팀 에이전트가 "무엇이 문제인가"를 탐지·설명한다. 톤은 관제실 — 어둡고
+   단조롭게, 빨강은 위협에만. 상단은 "분석가가 대응 중"임을 보여주는 바. */
+#lay-wh{flex:1;display:none;flex-direction:column;min-width:0;min-height:0;background:#0a0e14;color:#c9d4e0}
+#app.l-whitehat #lay-wh{display:flex}
+#wh-head{
+  flex:none;height:46px;display:flex;align-items:center;gap:14px;padding:0 14px;
+  background:linear-gradient(180deg,#121a26,#0d141d);border-bottom:1px solid #1d2733;
+}
+.wh-id{display:flex;align-items:center;gap:10px;min-width:0}
+.wh-badge{font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:.06em;color:#0a0e14;
+  background:#5ee08a;padding:3px 8px;border-radius:5px;flex:none}
+.wh-title{font-size:13.5px;font-weight:650;letter-spacing:-.01em;white-space:nowrap}
+.wh-sub{font-size:10.5px;color:#5f6f80;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wh-worker{margin-left:auto;display:flex;align-items:center;gap:11px;font-family:var(--mono);font-size:11px;
+  color:#8da0b4;flex:none}
+.wh-worker .wh-dot{width:8px;height:8px;border-radius:50%;background:#5ee08a;box-shadow:0 0 8px #5ee08a;
+  animation:wh-pulse 1.6s ease-in-out infinite}
+@keyframes wh-pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.wh-worker .wh-case{color:#5f6f80}
+.wh-worker .wh-clock{color:#c9d4e0;min-width:62px;text-align:right}
+
+#wh-metrics{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#161f2b;
+  border-bottom:1px solid #1d2733}
+#wh-metrics .m{padding:7px 13px 8px;background:#0c131c;min-width:0}
+#wh-metrics .m .k{font-size:9px;letter-spacing:.12em;color:#5f6f80;text-transform:uppercase;white-space:nowrap}
+#wh-metrics .m .v{font-family:var(--mono);font-size:18px;font-weight:600;margin-top:2px;letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;color:#e6eef7}
+#wh-metrics .m.warn .v{color:#f0883e}
+#wh-metrics .m.bad .v{color:#f85149}
+#wh-metrics .m.ok .v{color:#3fb950}
+#wh-metrics .m .v small{font-size:10px;color:#5f6f80;margin-left:3px;font-weight:400}
+
+#wh-body{flex:1;display:flex;min-height:0}
+#wh-left{flex:1.05;display:flex;flex-direction:column;min-width:0;border-right:1px solid #1d2733}
+#wh-right{flex:1;display:flex;flex-direction:column;min-width:0;background:#0b1118}
+#lay-wh .oh{height:28px;flex:none;display:flex;align-items:center;gap:8px;padding:0 13px;font-size:10.5px;
+  letter-spacing:.07em;text-transform:uppercase;color:#6b7c8e;border-bottom:1px solid #1d2733}
+#lay-wh .oh .r{margin-left:auto;font-family:var(--mono);font-size:10.5px;letter-spacing:0;text-transform:none;color:#7d8da0}
+
+#wh-log{
+  flex:1;overflow:hidden;padding:6px 0 8px 13px;font-family:var(--mono);font-size:11px;line-height:15.5px;
+  color:#7d8da0;white-space:pre;display:flex;flex-direction:column;justify-content:flex-end;
+}
+#wh-log .l{min-height:15.5px;flex:none;overflow:hidden;text-overflow:ellipsis}
+
+/* 오른쪽 — 에이전트 탐지 카드. 읽으라고 있는 쪽이다. */
+#wh-find{flex:1;overflow:auto;padding:10px 12px 16px;display:flex;flex-direction:column;gap:9px}
+.wh-card{
+  border:1px solid #1d2733;border-left-width:3px;border-radius:8px;background:#0e1620;
+  padding:9px 11px 10px;opacity:0;transform:translateY(6px);
+  animation:wh-in .34s ease forwards;
+}
+@keyframes wh-in{to{opacity:1;transform:none}}
+.wh-card .top{display:flex;align-items:center;gap:7px;margin-bottom:5px;flex-wrap:wrap}
+.wh-card .kind{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.05em;
+  padding:2px 6px;border-radius:4px;background:#1b2635;color:#9fb3c8;flex:none}
+.wh-card .sev{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.06em;
+  padding:2px 6px;border-radius:4px;flex:none}
+.wh-card .tag{font-family:var(--mono);font-size:9.5px;color:#6b7c8e;margin-left:auto;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.wh-card h4{margin:0 0 4px;font-size:12.5px;font-weight:640;letter-spacing:-.01em;color:#eaf1f8}
+.wh-card p{margin:0;font-size:11.5px;line-height:1.62;color:#aebccb}
+.wh-card.k-teach{background:#121020;border-left-color:#8b7bd8}
+.wh-card.k-teach h4{color:#d7cdff}
+.wh-card.k-fix{background:#0c1813;border-left-color:#3fb950}
+.wh-card.k-detect{border-left-color:#58a6ff}
+.wh-card.k-diag{border-left-color:#f0883e}
+.wh-phase-sep{display:flex;align-items:center;gap:9px;margin:5px 2px 1px;font-family:var(--mono);
+  font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#5f6f80}
+.wh-phase-sep::before{content:"";flex:none;width:18px;height:1px;background:#2a3744}
+.wh-phase-sep::after{content:"";flex:1;height:1px;background:#1d2733}
+
+@media (max-width:720px){
+  #wh-metrics{grid-template-columns:repeat(2,1fr)}
+  #wh-body{flex-direction:column}
+  #wh-left{border-right:none;border-bottom:1px solid #1d2733;flex:none;height:40%}
+}
+
 /* ═══════════════ 조작 바 ═══════════════
    화면에 게임 UI 를 남기지 않기 위해, 마우스를 움직일 때만 나타나고
    2.6초 뒤에 사라진다. 아무도 안 만지면 아무것도 보이지 않는다. */
@@ -846,6 +926,34 @@ input{font:inherit}
         </div>
       </div>
 
+      <!-- ── 화이트해커 모드 — 침해 대응 관제 ── -->
+      <div id="lay-wh">
+        <div id="wh-head">
+          <div class="wh-id">
+            <span class="wh-badge">⛊ SOC</span>
+            <span class="wh-title" id="wh-title">White-Hat Mode</span>
+            <span class="wh-sub" id="wh-sub"></span>
+          </div>
+          <div class="wh-worker">
+            <span class="wh-dot"></span>
+            <span id="wh-worker"></span>
+            <span class="wh-case" id="wh-case"></span>
+            <span class="wh-clock" id="wh-clock"></span>
+          </div>
+        </div>
+        <div id="wh-metrics"></div>
+        <div id="wh-body">
+          <div id="wh-left">
+            <div class="oh"><span id="wh-left-h">Live server logs</span><span class="r" id="wh-left-meta"></span></div>
+            <div id="wh-log"></div>
+          </div>
+          <div id="wh-right">
+            <div class="oh"><span id="wh-right-h">Blue-team agent</span><span class="r" id="wh-right-meta"></span></div>
+            <div id="wh-find" class="sb"></div>
+          </div>
+        </div>
+      </div>
+
     </div>
 
     <!-- 에이전트 패널 (IDE 전용) -->
@@ -981,6 +1089,7 @@ input{font:inherit}
 <script src="syntax.js"></script>
 <script src="i18n.js"></script>
 <script src="scenarios.js"></script>
+<script src="whitehat.js"></script>
 <script>
 "use strict";
 
@@ -1571,6 +1680,7 @@ const UI = {
     else if (CFG.layout === 'agent') t.textContent = 'agent — ' + RUN.stack.repo + ' — zsh — 204×54';
     else if (CFG.layout === 'swarm') t.textContent = 'tmux: agents — ' + RUN.stack.repo + ' — 4 panes';
     else if (CFG.layout === 'agi') t.textContent = 'fleet — ' + RUN.stack.org + ' — 342 agents — control';
+    else if (CFG.layout === 'whitehat') t.textContent = 'SOC — incident response — ' + RUN.stack.org + ' — console';
     else t.textContent = RUN.stack.org + '/' + RUN.stack.repo + ' — production — grafana';
   },
 
@@ -2338,6 +2448,140 @@ const Fleet = {
 };
 
 /* ════════════════════════════════════════════════════════════════════════
+   화이트해커 모드 — whitehat 레이아웃
+   ────────────────────────────────────────────────────────────────────────
+   공격을 가르치지 않는다. 방어를 보여 준다. 왼쪽엔 침입 로그가 흐르고,
+   오른쪽엔 블루팀 에이전트가 단계마다 "무엇이 문제인가"를 탐지·진단·설명
+   하고 막는 법을 내놓는다. 상단 바는 분석가가 대응 중임을 — 즉 작업자가
+   일하고 있음을 — 보여 준다. 데이터는 전부 합성이다.
+   ════════════════════════════════════════════════════════════════════════ */
+const WhiteHat = {
+  timers: [], _run: false, curPhase: null,
+
+  stop() {
+    this._run = false;
+    this.timers.forEach(clearInterval); this.timers.length = 0;
+    WH.PHASES.forEach(p => { if ('_seq' in p) p._seq = undefined; });
+  },
+
+  start() {
+    this.stop();
+    const lang = CFG.lang;
+    const L = WH.UI[lang] || WH.UI.en;
+
+    $('wh-title').textContent = L.title;
+    $('wh-sub').textContent = L.sub + ' · ' + L.sim;
+    $('wh-worker').textContent = L.worker + ' · ' + CFG.agent + ' — ' + L.responding;
+    $('wh-case').textContent = L.case + ' #IR-2026-' + (1000 + ri(100, 899));
+    $('wh-left-h').textContent = L.left;
+    $('wh-right-h').textContent = L.right;
+    $('wh-left-meta').textContent = '';
+    $('wh-right-meta').textContent = '';
+
+    const met = $('wh-metrics'); met.textContent = '';
+    const addTile = (label, cls) => {
+      const el = mkel('div', 'm' + (cls ? ' ' + cls : ''),
+        '<div class="k">' + esc(label) + '</div><div class="v">—</div>');
+      met.appendChild(el); return el.querySelector('.v');
+    };
+    this.tReq = addTile(L.reqmin);
+    this.tBlk = addTile(L.blocked, 'ok');
+    this.tFnd = addTile(L.findings, 'warn');
+    this.tPhs = addTile(L.phase);
+
+    this.blocked = 0; this.found = 0;
+    this.logStream = new Stream($('wh-log'), 220);
+    this.logStream.clear();
+    $('wh-find').textContent = '';
+    this.simTime = new Date(); this.simTime.setHours(13, 21, 0, 0);
+    this.curPhase = WH.PHASES[0];
+
+    $('wh-clock').textContent = hhmmss(new Date());
+    this.timers.push(setInterval(() => { $('wh-clock').textContent = hhmmss(new Date()); }, 1000));
+    this.timers.push(setInterval(() => { if (!PAUSED && this._run) this.emitLogs(); }, 420));
+
+    this._run = true;
+    this.playAll().catch(e => { if (e !== ABORT) console.error(e); });
+  },
+
+  emitLogs() {
+    const p = this.curPhase; if (!p) return;
+    const inten = { baseline: 1, recon: 3, stuffing: 4, perimeter: 2, exfil: 5, contain: 3 }[p.key] || 2;
+    const rows = p.gen(ri(1, inten));
+    if (p.key !== 'baseline' && Math.random() < 0.5) rows.push(...WH.PHASES[0].gen(1));
+    for (const e of rows) {
+      this.simTime = new Date(this.simTime.getTime() + ri(80, 900));
+      this.logStream.line(WH.fmtLog(e, hhmmss(this.simTime)));
+      if (e.code === 403 || p.key === 'contain') this.blocked++;
+    }
+    const rm = {
+      baseline: [40, 120], recon: [600, 1400], stuffing: [1800, 4200],
+      perimeter: [500, 1100], exfil: [900, 2100], contain: [200, 600],
+    }[p.key] || [100, 300];
+    this.tReq.textContent = ri(rm[0], rm[1]).toLocaleString();
+    this.tBlk.textContent = this.blocked.toLocaleString();
+    const reqTile = this.tReq.parentElement;
+    reqTile.classList.toggle('bad', p.key === 'stuffing' || p.key === 'exfil');
+    reqTile.classList.toggle('warn', p.key === 'recon' || p.key === 'perimeter');
+  },
+
+  sep(text) {
+    const el = mkel('div', 'wh-phase-sep', esc(text));
+    $('wh-find').appendChild(el);
+    $('wh-find').scrollTop = $('wh-find').scrollHeight;
+  },
+
+  card(f) {
+    const lang = CFG.lang;
+    const k = WH.KIND[f.kind] || WH.KIND.detect;
+    const s = WH.SEV[f.sev] || WH.SEV.info;
+    const tag = typeof f.tag === 'string' ? f.tag : (f.tag[lang] || f.tag.en);
+    const el = mkel('div', 'wh-card k-' + f.kind,
+      '<div class="top">' +
+        '<span class="kind">' + k.i + ' ' + esc(k[lang] || k.en) + '</span>' +
+        '<span class="sev" style="color:' + s.c + ';background:' + s.c + '22">' + esc(s[lang] || s.en) + '</span>' +
+        '<span class="tag">' + esc(tag) + '</span>' +
+      '</div>' +
+      '<h4>' + esc(f.title[lang] || f.title.en) + '</h4>' +
+      '<p>' + esc(f.body[lang] || f.body.en) + '</p>');
+    $('wh-find').appendChild(el);
+    $('wh-find').scrollTop = $('wh-find').scrollHeight;
+  },
+
+  async playAll() {
+    const g = GEN;
+    const lang = CFG.lang;
+    const L = WH.UI[lang] || WH.UI.en;
+    const lastIdx = WH.PHASES.length - 1;
+
+    while (this._run && g === GEN) {
+      for (let pi = 0; pi < WH.PHASES.length; pi++) {
+        if (!this._run || g !== GEN) return;
+        const p = WH.PHASES[pi];
+        this.curPhase = p;
+        this.tPhs.textContent = pi + '/' + lastIdx;
+        $('wh-left-meta').textContent = p.title[lang] || p.title.en;
+        this.sep((L.phase || 'phase').toUpperCase() + ' ' + pi + ' · ' + (p.title[lang] || p.title.en));
+        await wait(p.key === 'baseline' ? 1500 : 2800);
+        for (const f of p.findings) {
+          if (!this._run || g !== GEN) return;
+          this.card(f);
+          this.found++;
+          this.tFnd.textContent = this.found.toLocaleString();
+          $('wh-right-meta').textContent = this.found + ' ' + (L.findings || 'findings');
+          await wait(rnd(2600, 4300));
+        }
+        await wait(2200);
+      }
+      if (!CFG.opts.loop) { this._run = false; return; }
+      await wait(2800);
+      $('wh-find').textContent = '';
+      this.found = 0; this.blocked = 0;
+    }
+  },
+};
+
+/* ════════════════════════════════════════════════════════════════════════
    패닉 모드 — ` 키
    ────────────────────────────────────────────────────────────────────────
    누가 다가올 때. 터미널을 최대로 키우고 빌드/배포 로그를 쏟아붓는다.
@@ -2354,7 +2598,7 @@ const Panic = {
     $('panel').classList.add('max'); $('side').classList.add('hide'); $('chat').classList.add('hide');
     UI.panelTab('term');
     const pool = ['build', 'deploy', 'test_pass', 'push', 'migrate', 'cov'].map(r => RUN.stack.cmd[r]).filter(Boolean);
-    const target = { ide: 'term-out', agent: 'ag-out', swarm: 'agi-ev', ops: 'ops-log', agi: 'agi-ev' }[CFG.layout] || 'term-out';
+    const target = { ide: 'term-out', agent: 'ag-out', swarm: 'agi-ev', ops: 'ops-log', agi: 'agi-ev', whitehat: 'wh-log' }[CFG.layout] || 'term-out';
     const ags = new Stream($(target), 400);
     this.iv = setInterval(() => {
       if (PAUSED) return;
@@ -2494,7 +2738,7 @@ function applyChromeLang() {
 
 async function start() {
   GEN++;
-  Ops.stop(); Fleet.stop(); Panic.on = false; SPEED = 1; PAUSED = false;
+  Ops.stop(); Fleet.stop(); WhiteHat.stop(); Panic.on = false; SPEED = 1; PAUSED = false;
   $('toasts').textContent = ''; $('pings').textContent = '';
   const g = GEN;
 
@@ -2516,6 +2760,13 @@ async function start() {
     RUN = I18N.localize(SCEN.build(CFG.stack, CFG.mission, { bump: 0 }), CFG.lang);
     UI.title();
     Fleet.start();
+    return;
+  }
+
+  if (CFG.layout === 'whitehat') {
+    RUN = I18N.localize(SCEN.build(CFG.stack, CFG.mission, { bump: 0 }), CFG.lang);
+    UI.title();
+    WhiteHat.start();
     return;
   }
 
