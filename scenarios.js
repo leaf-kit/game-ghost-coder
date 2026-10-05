@@ -55,6 +55,11 @@ const LAYOUTS = {
     hint: 'Hundreds of agents working the whole backlog at once: nine live panes, aggregate throughput counters, and a merge-queue firehose. Throughput no team could produce — which is the point.',
     typing: false,
   },
+  whitehat: {
+    label: 'White-Hat — Incident Response', icon: '⛊',
+    hint: 'A separate scene: a blue-team security console. Attack logs stream in on the left (a reconstruction of the 2026 financial-sector AI breach); on the right an agent detects each pattern, says what is wrong, and teaches how to stop it. Educational, defensive — you look like the analyst holding the line.',
+    typing: false,
+  },
 };
 
 /* ════════════════════════════════════════════════════════════════════════

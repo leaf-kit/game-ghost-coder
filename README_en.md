@@ -49,6 +49,15 @@ throughput counters (agents online, tickets/hour, PRs merged, lines changed, tes
 tokens/sec, green-build rate, human reviews) and a merge-queue firehose. Throughput no
 team could produce, which is the message.
 
+**White-Hat Mode** — a separate defensive scene. A reconstruction of the 2026
+financial-sector AI breach (credential stuffing, peripheral-system auth bypass, mass
+loan-lookup API enumeration, traces of the `ARTEX` autonomous pentest tool). On the left,
+access logs stream in exactly as they would have landed on the real servers; on the right,
+a blue-team agent detects each stage, says **what is wrong**, explains why it is dangerous,
+and shows how to stop it (with OWASP/MITRE mapping). The top bar shows a SOC analyst
+responding — the worker on the job. It teaches defense, not attack, and every log line is
+synthetic.
+
 ---
 
 ## Development environments
