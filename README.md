@@ -135,20 +135,35 @@ python3 serve.py 8080      # 포트 지정
 
 정적 페이지이므로 GitHub Pages 나 다른 정적 호스팅에 그대로 올려도 동작합니다.
 
-### URL 파라미터
+### URL 파라미터 · 해시뱅 딥링크
 
-남는 모니터, 회의실 스크린, 키오스크에 띄워 둘 때 유용합니다.
+남는 모니터, 회의실 스크린, 키오스크에 띄워 둘 때 유용합니다. 두 가지 방식을
+모두 받습니다.
+
+**해시뱅(`#!`) — 공유용(권장).** 설정을 고르고 **출근**을 누르면, 그 설정이
+주소창의 해시에 자동으로 적힙니다. 그 URL 을 그대로 북마크·공유하면 다음에
+열었을 때 **같은 모드로 바로 입장**합니다. `leaf-kit.github.io` 같은 정적
+호스팅에서도 됩니다. 빠진 값은 전부 기본값으로 떨어집니다. 이미 열려 있는
+탭의 주소창에 다른 해시를 붙여넣으면 그 모드로 즉시 전환됩니다.
+
+```
+#!layout=whitehat&stack=next&theme=dark_modern&pace=turbo&lang=ko
+#!layout=agi&fleet=100&pace=hyper
+#!layout=ops&stack=azure&lang=ko&theme=github_dark
+```
+
+**쿼리스트링(`?`) — 기존 호환.** `auto=1` 이면 바로 시작합니다.
 
 ```
 ?auto=1&layout=agent&stack=go&mission=incident&pace=turbo
-?auto=1&layout=agi&fleet=100&pace=hyper
-?auto=1&layout=ops&stack=azure&lang=ko&theme=github_dark
 ```
+
+해시와 쿼리에 쓰는 키는 같습니다(쿼리가 해시를 덮어씁니다).
 
 | 파라미터 | 값 |
 |---|---|
-| `auto` | `1` 이면 바로 시작 |
-| `layout` | `ide` `agent` `swarm` `ops` `agi` |
+| `auto` | `1` 이면 바로 시작(쿼리 전용 · 해시는 있으면 자동 입장) |
+| `layout` | `ide` `agent` `swarm` `ops` `agi` `whitehat` |
 | `stack` | `next` `fastapi` `go` `rust` `k8s` `postgres` `langchain` `azure` |
 | `mission` | `feature` `incident` `refactor` `greenfield` `harden` `migrate` `review` `perf` |
 | `theme` | `dark_modern` `dark_plus` `monokai` `one_dark` `github_dark` |

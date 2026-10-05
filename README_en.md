@@ -143,20 +143,35 @@ python3 serve.py 8080      # pick a port
 
 It is a static page, so it also works unchanged on GitHub Pages or any static host.
 
-### URL parameters
+### URL parameters · hashbang deep-links
 
-Useful for a spare monitor, a meeting-room screen, or a kiosk.
+Useful for a spare monitor, a meeting-room screen, or a kiosk. Both forms work.
+
+**Hashbang (`#!`) — for sharing (recommended).** Pick your settings and hit
+**Clock in**; the chosen settings are written straight into the address-bar hash.
+Bookmark or share that URL and it reopens **directly in the same mode** next
+time — it works on static hosting like `leaf-kit.github.io`. Any missing value
+falls back to its default. Pasting a different hash into an already-open tab
+switches modes on the spot.
+
+```
+#!layout=whitehat&stack=next&theme=dark_modern&pace=turbo&lang=ko
+#!layout=agi&fleet=100&pace=hyper
+#!layout=ops&stack=azure&lang=ko&theme=github_dark
+```
+
+**Query string (`?`) — backwards compatible.** `auto=1` starts immediately.
 
 ```
 ?auto=1&layout=agent&stack=go&mission=incident&pace=turbo
-?auto=1&layout=agi&fleet=100&pace=hyper
-?auto=1&layout=ops&stack=azure&lang=ko&theme=github_dark
 ```
+
+The keys are the same in both (query overrides hash).
 
 | Parameter | Values |
 |---|---|
-| `auto` | `1` to start immediately |
-| `layout` | `ide` `agent` `swarm` `ops` `agi` |
+| `auto` | `1` to start immediately (query only; a hash auto-enters if present) |
+| `layout` | `ide` `agent` `swarm` `ops` `agi` `whitehat` |
 | `stack` | `next` `fastapi` `go` `rust` `k8s` `postgres` `langchain` `azure` |
 | `mission` | `feature` `incident` `refactor` `greenfield` `harden` `migrate` `review` `perf` |
 | `theme` | `dark_modern` `dark_plus` `monokai` `one_dark` `github_dark` |

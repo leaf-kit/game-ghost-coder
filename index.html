@@ -1123,7 +1123,7 @@ const ABORT = Symbol('abort');
 
 /* ── 설정 ─────────────────────────────────────────────────────────────── */
 const CFG = {
-  user: '', agent: '', model: SCEN.MODELS[0], lang: 'en',
+  user: '', agent: '', model: SCEN.MODELS[0], lang: 'ko',
   layout: 'ide', stack: 'next', mission: 'feature', theme: 'dark_modern', pace: 'agentp', fleet: 9,
   opts: { pings: true, notifs: true, palette: true, sound: false, loop: true },
 };
@@ -2747,6 +2747,7 @@ async function start() {
   CFG.model = $('in-model').value;
 
   HL.applyTheme(CFG.theme);
+  writeHash();                 // 지금 설정을 공유 가능한 해시뱅 URL 로 주소창에 박아 둔다
   $('app').classList.add('on');
   applyLayout();
   Ed.init();
@@ -2979,6 +2980,65 @@ function toggleFull() {
 }
 
 /* ════════════════════════════════════════════════════════════════════════
+   공유 URL — 해시뱅(#!) 딥링크
+   ────────────────────────────────────────────────────────────────────────
+   설정값을 그대로 URL 해시에 적어 두면, 그 주소를 다시 열었을 때 같은 모드로
+   곧바로 들어간다. GitHub Pages 처럼 쿼리스트링을 못 붙이는 정적 호스팅에서도
+   되라고 해시(#)를 쓴다. 빠진 값은 전부 기본값으로 떨어진다.
+     예) #!layout=whitehat&stack=next&theme=dark_modern&pace=turbo&lang=ko
+   ════════════════════════════════════════════════════════════════════════ */
+const OPT_DEFAULTS = { pings: true, notifs: true, palette: true, sound: false, loop: true };
+let HASH_LOCK = false;   // 우리가 직접 바꾼 해시에는 반응하지 않는다
+
+/** URLSearchParams 하나로 CFG·입력칸을 채운다. 인식 못한 값은 건드리지 않는다. */
+function applyParams(sp) {
+  if (!sp) return false;
+  let touched = false;
+  const take = (p, o, k) => { const v = sp.get(p); if (v != null && o[v] !== undefined) { CFG[k || p] = v; touched = true; } };
+  take('layout', SCEN.LAYOUTS); take('stack', SCEN.STACKS); take('theme', HL.THEMES); take('pace', SCEN.PACES);
+  take('lang', I18N.LANGS);
+  if (sp.get('fleet') != null) { CFG.fleet = clamp(parseInt(sp.get('fleet'), 10) || 9, 1, 100); touched = true; }
+  if (sp.get('mission') && SCEN.MISSIONS[sp.get('mission')]) { CFG.mission = sp.get('mission'); touched = true; }
+  if (sp.get('user') != null) { $('in-user').value = sp.get('user'); touched = true; }
+  if (sp.get('agent') != null) { $('in-agent').value = sp.get('agent'); touched = true; }
+  if (sp.get('model') && SCEN.MODELS.includes(sp.get('model'))) { CFG.model = sp.get('model'); touched = true; }
+  for (const o of OPTS) if (sp.get(o.k) != null) { CFG.opts[o.k] = sp.get(o.k) !== '0'; touched = true; }
+  return touched;
+}
+
+/** 현재 설정 → 해시뱅 문자열. 기본값과 같은 옵션 토글은 URL 에서 생략한다. */
+function buildHash() {
+  const p = new URLSearchParams();
+  p.set('layout', CFG.layout);
+  p.set('stack', CFG.stack);
+  p.set('mission', CFG.mission);
+  p.set('theme', CFG.theme);
+  p.set('pace', CFG.pace);
+  p.set('lang', CFG.lang);
+  if (CFG.layout === 'agi') p.set('fleet', String(CFG.fleet));
+  const u = ($('in-user').value || '').trim(); if (u) p.set('user', u);
+  const a = ($('in-agent').value || '').trim(); if (a) p.set('agent', a);
+  if (CFG.model) p.set('model', CFG.model);
+  for (const o of OPTS) if (CFG.opts[o.k] !== OPT_DEFAULTS[o.k]) p.set(o.k, CFG.opts[o.k] ? '1' : '0');
+  return '#!' + p.toString();
+}
+
+/** 주소창의 해시를 현재 설정으로 갱신한다(히스토리 오염 없이). */
+function writeHash() {
+  try { HASH_LOCK = true; history.replaceState(null, '', buildHash()); }
+  catch (e) { try { location.hash = buildHash(); } catch (_) {} }
+  finally { setTimeout(() => { HASH_LOCK = false; }, 0); }
+}
+
+/** 해시(#! 또는 #) → URLSearchParams. 비어 있으면 null. */
+function parseHash() {
+  let h = location.hash || '';
+  h = h.replace(/^#/, '').replace(/^!/, '').replace(/^\//, '');
+  if (!h) return null;
+  try { return new URLSearchParams(h); } catch (e) { return null; }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
    부팅
    ════════════════════════════════════════════════════════════════════════ */
 (function boot() {
@@ -3012,21 +3072,30 @@ function toggleFull() {
   window.addEventListener('resize', () => { Ed.init(); Ed.paint(); });
   document.addEventListener('click', () => Sound.ensure(), { once: true });
 
-  /* URL 파라미터로 바로 시작 — 사무실 모니터에 띄워 두는 용도
-     ?auto=1&layout=agent&stack=go&mission=incident&theme=monokai&pace=turbo&user=leaf */
+  /* 딥링크로 바로 시작 — 두 방식을 모두 받는다.
+       해시뱅  #!layout=whitehat&stack=next&theme=dark_modern&pace=turbo&lang=ko   (공유용·권장)
+       쿼리    ?auto=1&layout=agent&stack=go&mission=incident&pace=turbo&user=leaf  (기존 호환)
+     해시에 설정이 있으면 그대로 그 모드로 자동 입장한다. 빠진 값은 기본값. */
+  const hp = parseHash();
   const q = new URLSearchParams(location.search);
-  const take = (p, o, k) => { const v = q.get(p); if (v && o[v] !== undefined) CFG[k || p] = v; };
-  take('layout', SCEN.LAYOUTS); take('stack', SCEN.STACKS); take('theme', HL.THEMES); take('pace', SCEN.PACES);
-  take('lang', I18N.LANGS);
-  if (q.get('fleet')) CFG.fleet = clamp(parseInt(q.get('fleet'), 10) || 9, 1, 100);
-  if (q.get('mission') && SCEN.MISSIONS[q.get('mission')]) CFG.mission = q.get('mission');
-  if (q.get('user')) $('in-user').value = q.get('user');
-  if (q.get('agent')) $('in-agent').value = q.get('agent');
-  if (q.get('model') && SCEN.MODELS.includes(q.get('model'))) CFG.model = q.get('model');
-  for (const o of OPTS) if (q.get(o.k) !== null) CFG.opts[o.k] = q.get(o.k) !== '0';
+  let auto = false;
+  if (applyParams(hp)) auto = true;     // 해시 먼저
+  if (applyParams(q)) { /* 쿼리가 해시를 덮어쓴다 */ }
+  if (q.get('auto') === '1') auto = true;
   HL.applyTheme(CFG.theme);
   Launcher.build();
-  if (q.get('auto') === '1') setTimeout(start, 240);
+  if (auto) setTimeout(start, 240);
+
+  /* 사용자가 주소창에서 해시를 직접 바꾸면(공유 링크를 붙여넣는 등) 다시 적용하고
+     해당 모드로 재시작한다. 우리가 writeHash() 로 바꾼 것에는 반응하지 않는다. */
+  window.addEventListener('hashchange', () => {
+    if (HASH_LOCK) return;
+    const sp = parseHash();
+    if (!applyParams(sp)) return;
+    HL.applyTheme(CFG.theme);
+    Launcher.build();
+    start();
+  });
 })();
 </script>
 </body>
