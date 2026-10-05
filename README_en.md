@@ -169,13 +169,15 @@ Useful for a spare monitor, a meeting-room screen, or a kiosk. Both forms work.
 **Clock in**; the chosen settings are written straight into the address-bar hash.
 Bookmark or share that URL and it reopens **directly in the same mode** next
 time — it works on static hosting like `leaf-kit.github.io`. Any missing value
-falls back to its default. Pasting a different hash into an already-open tab
-switches modes on the spot.
+falls back to its default, and **anything left at its default is omitted** so the
+URL stays as short as possible (if everything is default, the hash disappears
+entirely). Pasting a different hash into an already-open tab switches modes on
+the spot.
 
 ```
-#!layout=whitehat&stack=next&theme=dark_modern&pace=turbo&lang=ko
+#!layout=whitehat                       ← everything else is default
 #!layout=agi&fleet=100&pace=hyper
-#!layout=ops&stack=azure&lang=ko&theme=github_dark
+#!layout=ops&theme=github_dark&lang=en
 ```
 
 **Query string (`?`) — backwards compatible.** `auto=1` starts immediately.

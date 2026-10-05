@@ -162,13 +162,15 @@ python3 serve.py 8080      # 포트 지정
 **해시뱅(`#!`) — 공유용(권장).** 설정을 고르고 **출근**을 누르면, 그 설정이
 주소창의 해시에 자동으로 적힙니다. 그 URL 을 그대로 북마크·공유하면 다음에
 열었을 때 **같은 모드로 바로 입장**합니다. `leaf-kit.github.io` 같은 정적
-호스팅에서도 됩니다. 빠진 값은 전부 기본값으로 떨어집니다. 이미 열려 있는
-탭의 주소창에 다른 해시를 붙여넣으면 그 모드로 즉시 전환됩니다.
+호스팅에서도 됩니다. 빠진 값은 전부 기본값으로 떨어지고, **기본값과 같은 설정은
+URL 에서 생략**돼 주소가 최대한 짧게 유지됩니다(전부 기본값이면 해시 자체가
+사라집니다). 이미 열려 있는 탭의 주소창에 다른 해시를 붙여넣으면 그 모드로
+즉시 전환됩니다.
 
 ```
-#!layout=whitehat&stack=next&theme=dark_modern&pace=turbo&lang=ko
+#!layout=whitehat                       ← 나머지는 전부 기본값
 #!layout=agi&fleet=100&pace=hyper
-#!layout=ops&stack=azure&lang=ko&theme=github_dark
+#!layout=ops&theme=github_dark&lang=en
 ```
 
 **쿼리스트링(`?`) — 기존 호환.** `auto=1` 이면 바로 시작합니다.
