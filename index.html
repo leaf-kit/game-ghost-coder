@@ -3008,6 +3008,9 @@ function toggleFull() {
      예) #!layout=whitehat&stack=next&theme=dark_modern&pace=turbo&lang=ko
    ════════════════════════════════════════════════════════════════════════ */
 const OPT_DEFAULTS = { pings: true, notifs: true, palette: true, sound: false, loop: true };
+/* CFG 의 최초 기본값 스냅샷. 해시뱅 URL 은 이 값과 다른 설정만 적는다 —
+   빠진 키는 어차피 이 값으로 떨어지므로, 기본값을 쓸수록 URL 이 짧아진다. */
+const CFG_DEFAULTS = { layout: 'ide', stack: 'next', mission: 'feature', theme: 'dark_modern', pace: 'agentp', fleet: 9, lang: 'ko', model: SCEN.MODELS[0] };
 let HASH_LOCK = false;   // 우리가 직접 바꾼 해시에는 반응하지 않는다
 
 /** URLSearchParams 하나로 CFG·입력칸을 채운다. 인식 못한 값은 건드리지 않는다. */
@@ -3026,26 +3029,31 @@ function applyParams(sp) {
   return touched;
 }
 
-/** 현재 설정 → 해시뱅 문자열. 기본값과 같은 옵션 토글은 URL 에서 생략한다. */
+/** 현재 설정 → 해시뱅 문자열. 기본값과 같은 값은 전부 생략해 최대한 짧게 유지한다.
+    전부 기본값이면 빈 문자열을 돌려주고, 그러면 주소창에서 해시 자체가 사라진다. */
 function buildHash() {
   const p = new URLSearchParams();
-  p.set('layout', CFG.layout);
-  p.set('stack', CFG.stack);
-  p.set('mission', CFG.mission);
-  p.set('theme', CFG.theme);
-  p.set('pace', CFG.pace);
-  p.set('lang', CFG.lang);
-  if (CFG.layout === 'agi') p.set('fleet', String(CFG.fleet));
+  const set = (k, v, def) => { if (v != null && String(v) !== String(def)) p.set(k, v); };
+  set('layout', CFG.layout, CFG_DEFAULTS.layout);
+  set('stack', CFG.stack, CFG_DEFAULTS.stack);
+  set('mission', CFG.mission, CFG_DEFAULTS.mission);
+  set('theme', CFG.theme, CFG_DEFAULTS.theme);
+  set('pace', CFG.pace, CFG_DEFAULTS.pace);
+  set('lang', CFG.lang, CFG_DEFAULTS.lang);
+  if (CFG.layout === 'agi') set('fleet', CFG.fleet, CFG_DEFAULTS.fleet);
   const u = ($('in-user').value || '').trim(); if (u) p.set('user', u);
   const a = ($('in-agent').value || '').trim(); if (a) p.set('agent', a);
-  if (CFG.model) p.set('model', CFG.model);
+  set('model', CFG.model, CFG_DEFAULTS.model);
   for (const o of OPTS) if (CFG.opts[o.k] !== OPT_DEFAULTS[o.k]) p.set(o.k, CFG.opts[o.k] ? '1' : '0');
-  return '#!' + p.toString();
+  const s = p.toString();
+  return s ? '#!' + s : '';
 }
 
-/** 주소창의 해시를 현재 설정으로 갱신한다(히스토리 오염 없이). */
+/** 주소창의 해시를 현재 설정으로 갱신한다(히스토리 오염 없이).
+    전부 기본값이라 해시가 비면, 해시를 아예 지워 깔끔한 주소로 둔다. */
 function writeHash() {
-  try { HASH_LOCK = true; history.replaceState(null, '', buildHash()); }
+  const h = buildHash() || (location.pathname + location.search);
+  try { HASH_LOCK = true; history.replaceState(null, '', h); }
   catch (e) { try { location.hash = buildHash(); } catch (_) {} }
   finally { setTimeout(() => { HASH_LOCK = false; }, 0); }
 }
